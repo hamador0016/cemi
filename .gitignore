@@ -1,0 +1,14 @@
+# Notas privadas con nombres de infraestructura real: nunca se publican
+privado/
+
+# Bóvedas, variables y llaves
+.cemi/
+.env
+.env.*
+!.env.example
+*.pem
+*.key
+*.age
+
+# Rust
+target/

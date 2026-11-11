@@ -1,0 +1,43 @@
+# Dependency policy for Cemí (cargo-deny).
+# Rule: permissive licenses only. No GPL, AGPL, LGPL or SSPL.
+# If a new dependency fails this check, do not add its license here without
+# reviewing it: look for another library instead.
+
+[graph]
+all-features = true
+
+[licenses]
+confidence-threshold = 0.93
+unused-allowed-license = "allow"
+allow = [
+  "MIT",
+  "MIT-0",
+  "Apache-2.0",
+  "Apache-2.0 WITH LLVM-exception",
+  "BSD-2-Clause",
+  "BSD-3-Clause",
+  "ISC",
+  "Zlib",
+  "0BSD",
+  "BSL-1.0",
+  "CC0-1.0",
+  "Unicode-3.0",
+  "Unlicense",
+  "CDLA-Permissive-2.0",
+]
+
+[bans]
+multiple-versions = "allow"
+wildcards = "deny"
+
+[advisories]
+# Fail on known vulnerabilities (RustSec). Every exception below says why it does
+# not affect Cemí and when to remove it. Review them on every age update.
+ignore = [
+  { id = "RUSTSEC-2026-0387", reason = "crypto-bigint 0.5 timing issues, pulled in by age 0.12 through p256/hpke for its P-256 'tag' recipients. Cemí only creates and uses X25519 identities, and age's X25519 identity never runs P-256 code, so the affected operations never touch Cemí's secrets. Remove once age depends on elliptic-curve 0.14 / crypto-bigint >= 0.7.6." },
+  { id = "RUSTSEC-2026-0374", reason = "basic-toml is unmaintained (no vulnerability). age uses it via i18n-embed to read its own embedded localization config. Remove when age drops it." },
+]
+
+[sources]
+unknown-registry = "deny"
+unknown-git = "deny"

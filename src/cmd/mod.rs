@@ -1,0 +1,265 @@
+//! Command implementations.
+
+mod mcp_cmds;
+mod memory;
+mod project_cmds;
+mod scan_cmds;
+mod structure;
+mod values;
+mod vault_cmds;
+
+use anyhow::{Result, anyhow};
+
+use crate::audit::{self, Event};
+use crate::cli::{Cli, Cmd};
+use crate::model::Record;
+use crate::project::Project;
+use crate::refs::{self, Ref, VaultSel};
+use crate::ui;
+use crate::vault::{Scope, Vault};
+use crate::workspace::{self, Workspace};
+
+pub struct Ctx {
+    pub ws: Workspace,
+    pub global: bool,
+}
+
+impl Ctx {
+    fn new(global: bool, write: bool) -> Result<Ctx> {
+        Ok(Ctx {
+            ws: Workspace::new(write)?,
+            global,
+        })
+    }
+
+    pub fn sel(&self) -> VaultSel {
+        if self.global {
+            VaultSel::Global
+        } else {
+            VaultSel::Default
+        }
+    }
+
+    pub fn scope(&self) -> Result<Scope> {
+        self.ws.scope_for(self.sel())
+    }
+
+    pub fn vault(&mut self) -> Result<&mut Vault> {
+        let sel = self.sel();
+        self.ws.open_sel(sel)
+    }
+
+    pub fn parse_ref(&self, text: &str) -> Result<Ref> {
+        let mut r = Ref::parse(text)?;
+        if self.global && r.vault == VaultSel::Default {
+            r.vault = VaultSel::Global;
+        }
+        Ok(r)
+    }
+
+    pub fn entity_path(&self, text: Option<&str>) -> Result<(VaultSel, Vec<String>)> {
+        let text = text.unwrap_or("");
+        let (sel, rest) = if let Some(r) = text.strip_prefix("global:") {
+            (VaultSel::Global, r)
+        } else if let Some(r) = text.strip_prefix("local:") {
+            (VaultSel::Local, r)
+        } else {
+            (self.sel(), text)
+        };
+        Ok((sel, refs::entity_path(rest)?))
+    }
+
+    /// Finds a record from a reference, returning (scope, record id).
+    pub fn record_id(&mut self, r: &Ref) -> Result<(Scope, String)> {
+        let scope = self.ws.scope_for(r.vault)?;
+        let v = self.ws.open(scope)?;
+        Ok((scope, v.find_record_id(&r.entities, &r.record)?))
+    }
+
+    pub fn record(&mut self, r: &Ref) -> Result<(Scope, Record)> {
+        let (scope, id) = self.record_id(r)?;
+        Ok((
+            scope,
+            self.ws.get(scope).expect("opened").records[&id].clone(),
+        ))
+    }
+
+    pub fn audit(&self, scope: Scope, action: &str, target: Option<String>, env: Option<&str>) {
+        self.audit_detail(scope, action, target, env, None);
+    }
+
+    pub fn audit_detail(
+        &self,
+        scope: Scope,
+        action: &str,
+        target: Option<String>,
+        env: Option<&str>,
+        detail: Option<String>,
+    ) {
+        let Some(v) = self.ws.get(scope) else { return };
+        if let Err(e) = audit::append(
+            &v.dir,
+            &v.header,
+            Event {
+                actor: "cli",
+                action,
+                target,
+                env: env.map(str::to_string),
+                detail,
+            },
+        ) {
+            ui::warn(format!("could not write the audit log: {e}"));
+        }
+    }
+
+    pub fn project(&self) -> Result<Option<Project>> {
+        match workspace::find_project_file(&self.ws.cwd) {
+            Some(p) => Ok(Some(Project::load(&p)?)),
+            None => Ok(None),
+        }
+    }
+
+    pub fn require_project(&self) -> Result<Project> {
+        self.project()?.ok_or_else(|| {
+            anyhow!("no cemi.toml in this folder or its parents. Create one with `cemi init` or `cemi link`")
+        })
+    }
+}
+
+/// Commands that change a vault take its lock for writing.
+fn writes(cmd: &Cmd) -> bool {
+    use crate::cli::*;
+    match cmd {
+        Cmd::Status
+        | Cmd::Doctor
+        | Cmd::Ls { .. }
+        | Cmd::Find { .. }
+        | Cmd::Show { .. }
+        | Cmd::Copy { .. }
+        | Cmd::Reveal { .. }
+        | Cmd::History { .. }
+        | Cmd::Deps { .. }
+        | Cmd::Doc { .. }
+        | Cmd::Run { .. }
+        | Cmd::Export { .. }
+        | Cmd::Log { .. }
+        | Cmd::Scan { .. }
+        | Cmd::Unlock
+        | Cmd::Lock => false,
+        Cmd::Env(EnvCmd::Ls { .. } | EnvCmd::Diff { .. }) => false,
+        Cmd::Task(TaskCmd::Ls) => false,
+        Cmd::Token(TokenCmd::Ls) => false,
+        Cmd::Mcp(
+            McpCmd::Ls | McpCmd::Launch { .. } | McpCmd::Setup { .. } | McpCmd::Serve { .. },
+        ) => false,
+        Cmd::Var(_) => false,
+        Cmd::Note(n) => {
+            n.purpose.is_some()
+                || n.used_in.is_some()
+                || n.rotate.is_some()
+                || n.if_lost.is_some()
+                || n.if_leaked.is_some()
+                || n.expires.is_some()
+                || n.backup.is_some()
+                || n.links.is_some()
+                || n.delicate.is_some()
+                || !n.set.is_empty()
+                || !n.unset.is_empty()
+        }
+        _ => true,
+    }
+}
+
+pub fn run(cli: Cli) -> Result<i32> {
+    if cli.password_stdin {
+        ui::use_password_stdin();
+    }
+    let write = writes(&cli.command);
+    let global = cli.global;
+    let mut ctx = Ctx::new(global, write)?;
+    use crate::cli::Cmd as C;
+    match cli.command {
+        C::Init { envs, own_password } => vault_cmds::init(&mut ctx, &envs, own_password),
+        C::Unlock => vault_cmds::unlock(&mut ctx),
+        C::Lock => vault_cmds::lock(&mut ctx),
+        C::Status => memory::status(&mut ctx),
+        C::Recovery(c) => vault_cmds::recovery(&mut ctx, c),
+        C::Passwd => vault_cmds::passwd(&mut ctx),
+        C::Doctor => vault_cmds::doctor(&mut ctx),
+        C::Ls { path, all } => structure::ls(&mut ctx, path.as_deref(), all),
+        C::Add { path } => structure::add(&mut ctx, &path),
+        C::Mv { from, to } => structure::mv(&mut ctx, &from, &to),
+        C::Rm { path, purge } => structure::rm(&mut ctx, &path, purge),
+        C::Field(c) => structure::field(&mut ctx, c),
+        C::Find { text } => structure::find(&mut ctx, &text),
+        C::Show { reference } => structure::show(&mut ctx, &reference),
+        C::Set {
+            reference,
+            env,
+            stdin,
+            from_file,
+            external,
+            note,
+        } => values::set(
+            &mut ctx,
+            &reference,
+            env.as_deref(),
+            stdin,
+            from_file,
+            external,
+            note,
+        ),
+        C::Generate {
+            reference,
+            env,
+            length,
+            charset,
+            note,
+        } => values::generate(&mut ctx, &reference, env.as_deref(), length, charset, note),
+        C::Copy { reference, env } => values::copy(&mut ctx, &reference, env.as_deref()),
+        C::Reveal { reference, env } => values::reveal(&mut ctx, &reference, env.as_deref()),
+        C::History { reference, env } => values::history(&mut ctx, &reference, env.as_deref()),
+        C::Revert {
+            reference,
+            number,
+            env,
+        } => values::revert(&mut ctx, &reference, number, env.as_deref()),
+        C::Note(args) => memory::note(&mut ctx, args),
+        C::Task(c) => memory::task(&mut ctx, c),
+        C::Deps { reference } => memory::deps(&mut ctx, &reference),
+        C::Doc { entity, output } => memory::doc(&mut ctx, entity.as_deref(), output),
+        C::Env(c) => structure::env(&mut ctx, c),
+        C::Link { entity } => project_cmds::link(&mut ctx, entity.as_deref()),
+        C::Var(c) => project_cmds::var(&mut ctx, c),
+        C::Run {
+            env,
+            redact,
+            command,
+        } => project_cmds::run(ctx, env.as_deref(), redact, &command),
+        C::Export { output } => project_cmds::export(&mut ctx, output),
+        C::Import {
+            file,
+            into,
+            env,
+            plain,
+            no_link,
+        } => project_cmds::import(
+            &mut ctx,
+            &file,
+            into.as_deref(),
+            env.as_deref(),
+            &plain,
+            no_link,
+        ),
+        C::Token(c) => mcp_cmds::token(&mut ctx, c),
+        C::Mcp(c) => mcp_cmds::mcp(ctx, c),
+        C::Log { limit, verify } => vault_cmds::log(&mut ctx, limit, verify),
+        C::Scan {
+            path,
+            staged,
+            history,
+        } => scan_cmds::scan(&mut ctx, path, staged, history),
+        C::Hook(c) => scan_cmds::hook(&mut ctx, c),
+        C::ClipboardHelper { seconds } => values::clipboard_helper(seconds),
+    }
+}
