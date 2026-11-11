@@ -392,7 +392,7 @@ mod tests {
     #[test]
     fn hides_plain_and_encoded_values() {
         let out = r().redact(
-            b"token=sk_live_abc123 b64=c2tfbGl2ZV9hYmMxMjM= hex=736b5f6c6976655f616263313233",
+            b"token=sk_live_abc123 b64=c2tfbGl2ZV9hYmMxMjM= hex=736b5f6c6976655f616263313233", // gitleaks:allow (fake test value)
         );
         let s = String::from_utf8(out).unwrap();
         assert!(!s.contains("sk_live_abc123"));

@@ -1,6 +1,6 @@
-//! Cryptographic building blocks. Nothing here is invented: Argon2id for
-//! passwords, XChaCha20-Poly1305 to wrap the vault identity, and age (X25519)
-//! for every stored object.
+//! Cryptographic building blocks. Nothing here is invented: Argon2id derives
+//! the password key; XChaCha20-Poly1305 wraps the vault identity; age (X25519)
+//! encrypts every stored object.
 
 use std::io::Read;
 
