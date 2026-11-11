@@ -223,14 +223,14 @@ pub enum Cmd {
         )]
         command: Vec<String>,
     },
-    /// Send current values to the destinations that do not have them yet
+    /// Send current values to the destinations that are missing them or are out of date
     Push {
         /// record#field (default: every field with destinations)
         reference: Option<String>,
         /// Only the destinations of this environment
         #[arg(short, long)]
         env: Option<String>,
-        /// Send even when the destination already has the value
+        /// Send without checking first: also overwrites values changed outside Cemí
         #[arg(long)]
         force: bool,
     },

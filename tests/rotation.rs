@@ -111,8 +111,35 @@ fn dotenv_destinations_push_check_and_rotate() {
     let (code, out, _) = env.run(&["check"], "");
     assert_eq!(code, 1);
     assert!(out.contains("changed outside"), "{out}");
+    assert!(
+        out.contains("cemi push --force local:db#password -e dev"),
+        "{out}"
+    );
+    // A plain push does not overwrite it: it may be a newer key set by hand.
+    let (code, _, err) = env.run(&["push"], "");
+    assert_eq!(code, 1);
+    assert!(err.contains("not overwritten"), "{err}");
+    assert_eq!(
+        dotenv_value(&file, "DB_PASSWORD").as_deref(),
+        Some("edited-by-hand")
+    );
     env.ok(&["push", "--force"], "");
     assert_eq!(dotenv_value(&file, "DB_PASSWORD").as_deref(), Some(SECRET));
+
+    // Someone deletes it: push asks the destination and sends it again.
+    let text: String = std::fs::read_to_string(&file)
+        .unwrap()
+        .lines()
+        .filter(|l| !l.starts_with("DB_PASSWORD="))
+        .map(|l| format!("{l}\n"))
+        .collect();
+    std::fs::write(&file, text).unwrap();
+    let (code, out, _) = env.run(&["check"], "");
+    assert_eq!(code, 1);
+    assert!(out.contains("missing at the destination"), "{out}");
+    env.ok(&["push"], "");
+    assert_eq!(dotenv_value(&file, "DB_PASSWORD").as_deref(), Some(SECRET));
+    env.ok(&["check"], "");
 
     // Rotation with a generated value reaches the template too.
     let (_, _, err) = env.run(
@@ -126,7 +153,10 @@ fn dotenv_destinations_push_check_and_rotate() {
         dotenv_value(&file, "DATABASE_URL").unwrap(),
         format!("postgres://app:{new}@localhost/app")
     );
-    assert!(err.contains("by hand"), "{err}");
+    assert!(
+        err.contains("! Revoke the old key at its provider by hand"),
+        "{err}"
+    );
     assert!(!err.contains(&new), "the new value was printed: {err}");
     let hist = env.ok(&["history", "db#password", "-e", "dev"], "");
     assert!(
@@ -167,7 +197,10 @@ fn failed_verification_puts_the_old_value_back() {
     );
     assert_ne!(code, 0);
     assert!(err.contains("failed and was undone"), "{err}");
-    assert!(err.contains("Put the old value back"), "{err}");
+    assert!(err.contains("! Problem: verification failed"), "{err}");
+    // Each step is shown once, marked; the final error does not repeat them.
+    assert_eq!(err.matches("✓ Put the old value back").count(), 1, "{err}");
+    assert_eq!(err.matches("Put the old value back").count(), 1, "{err}");
     assert_eq!(dotenv_value(&file, "DB_PASSWORD").as_deref(), Some(SECRET));
     let hist = env.ok(&["history", "db#password", "-e", "dev"], "");
     assert!(

@@ -13,7 +13,7 @@ use zeroize::Zeroizing;
 use crate::audit;
 use crate::cli::Charset;
 use crate::cmd_shared::random_string;
-use crate::connectors::{self, DestSpec, Observed, OriginSpec, OriginState, Revoked};
+use crate::connectors::{self, Observed, OriginSpec, OriginState, Revoked};
 use crate::crypto;
 use crate::model::{
     Delivery, Destination, Field, FieldKind, SHARED, Value, Version, VersionState, memory_keys,
@@ -342,24 +342,11 @@ pub fn needs_approval(ws: &mut Workspace, env: Option<&str>, dests: &[DestRef]) 
 
 // ----- push -----
 
-pub enum PushOutcome {
-    Sent,
-    AlreadyThere,
-}
-
-/// Sends the current value to one destination, unless it already has it.
-pub fn push_one(ws: &mut Workspace, d: &DestRef, force: bool, actor: &str) -> Result<PushOutcome> {
+/// Sends the current value to one destination. Callers decide first with
+/// [`check_one`] and [`DestStatus::needs_push`].
+pub fn push_one(ws: &mut Workspace, d: &DestRef, actor: &str) -> Result<()> {
     let dest = destination(ws, d)?;
     let value = value_for(ws, d)?;
-    let fingerprint = crypto::sha256_hex(&value);
-    if !force
-        && dest
-            .last
-            .as_ref()
-            .is_some_and(|l| l.fingerprint == fingerprint)
-    {
-        return Ok(PushOutcome::AlreadyThere);
-    }
     deliver(ws, d, &value)?;
     save(ws, d.field.scope)?;
     let target = d.field.text(ws);
@@ -372,7 +359,7 @@ pub fn push_one(ws: &mut Workspace, d: &DestRef, force: bool, actor: &str) -> Re
         Some(&dest.env),
         Some(dest.spec.describe()),
     );
-    Ok(PushOutcome::Sent)
+    Ok(())
 }
 
 /// Writes `value` to a destination and records the delivery (not saved).
@@ -427,14 +414,44 @@ impl DestStatus {
     pub fn is_ok(&self) -> bool {
         matches!(self, DestStatus::UpToDate | DestStatus::Unverifiable)
     }
+
+    /// Whether `push` sends the value without being forced. A value changed
+    /// outside Cemí is not overwritten: it may be a newer key set by hand.
+    pub fn needs_push(&self) -> bool {
+        matches!(
+            self,
+            DestStatus::Outdated | DestStatus::NeverSent | DestStatus::Missing
+        )
+    }
 }
 
 pub struct CheckLine {
     pub field: String,
+    /// The environment for people ("all environments" for a shared value).
     pub env: String,
+    /// The environment as stored (SHARED for a shared value).
+    pub slot: String,
     pub id: String,
     pub describe: String,
     pub status: DestStatus,
+}
+
+impl CheckLine {
+    /// The command that overwrites this destination with the vault's value.
+    pub fn force_command(&self) -> String {
+        match slot_env(&self.slot) {
+            Some(e) => format!("cemi push --force {} -e {e}", self.field),
+            None => format!("cemi push --force {}", self.field),
+        }
+    }
+
+    /// What a person reads when this destination changed outside Cemí.
+    pub fn changed_outside_hint(&self) -> String {
+        format!(
+            "`{}` puts the vault's value back; if the new value is the right one, save it with `cemi set`",
+            self.force_command()
+        )
+    }
 }
 
 /// Compares the vault with what was sent. With `remote`, also asks the
@@ -444,6 +461,7 @@ pub fn check_one(ws: &mut Workspace, d: &DestRef, remote: bool) -> CheckLine {
     let mut line = CheckLine {
         field,
         env: String::new(),
+        slot: String::new(),
         id: d.id.clone(),
         describe: String::new(),
         status: DestStatus::UpToDate,
@@ -456,6 +474,7 @@ pub fn check_one(ws: &mut Workspace, d: &DestRef, remote: bool) -> CheckLine {
         }
     };
     line.env = env_label(&dest.env).to_string();
+    line.slot = dest.env.clone();
     line.describe = dest.spec.describe();
     let current = match value_for(ws, d) {
         Ok(v) => crypto::sha256_hex(&v),
@@ -476,11 +495,8 @@ pub fn check_one(ws: &mut Workspace, d: &DestRef, remote: bool) -> CheckLine {
             }
             Ok(Observed::Remote(now)) => {
                 if last.remote.as_ref().is_some_and(|before| *before != now) {
-                    line.status = DestStatus::ChangedOutside(match &dest.spec {
-                        DestSpec::Dotenv { .. } => "the file has another value".into(),
-                        DestSpec::SupabaseSecret { .. } => "its digest changed".into(),
-                        _ => now,
-                    });
+                    line.status =
+                        DestStatus::ChangedOutside(connectors::describe_change(&dest.spec, &now));
                     return line;
                 }
             }
@@ -630,19 +646,24 @@ pub fn describe_plan(
     Ok(out)
 }
 
-pub struct RotateReport {
-    pub lines: Vec<String>,
+/// How a step of a rotation went, so people see it marked as done or as
+/// something that needs them.
+#[derive(Clone, Copy, PartialEq, Eq, Debug)]
+pub enum Step {
+    Done,
+    Attention,
 }
 
-/// Rotates `fr` for `env`. The caller has already checked approval.
+/// Rotates `fr` for `env`, telling `progress` each step as it happens. The
+/// caller has already checked approval.
 pub fn rotate(
     ws: &mut Workspace,
     fr: &FieldRef,
     env: Option<&str>,
     opts: RotateOptions,
     actor: &str,
-    progress: &mut dyn FnMut(&str),
-) -> Result<RotateReport> {
+    progress: &mut dyn FnMut(Step, &str),
+) -> Result<()> {
     let name = fr.text(ws);
     let f = fr.field(ws)?.clone();
     match f.kind {
@@ -656,19 +677,13 @@ pub fn rotate(
     }
     let slot = slot_key(ws, fr, env)?;
     let origin = f.origins.get(&slot).cloned();
-    let mut report = RotateReport { lines: Vec::new() };
-    let mut say = |report: &mut RotateReport, s: String| {
-        progress(&s);
-        report.lines.push(s);
-    };
-
     // 1. The new value, saved as pending before anything else.
     let existing = f.values.get(&slot).and_then(|s| s.pending_index());
     let pending = match existing {
         Some(i) => {
-            say(
-                &mut report,
-                "Continuing an unfinished rotation with its pending value".into(),
+            progress(
+                Step::Done,
+                "Continuing an unfinished rotation with its pending value",
             );
             i
         }
@@ -730,7 +745,7 @@ pub fn rotate(
                 Some(&slot),
                 Some(how.clone()),
             );
-            say(&mut report, format!("New value {how} (saved as pending)"));
+            progress(Step::Done, &format!("New value {how} (saved as pending)"));
             i
         }
     };
@@ -755,7 +770,7 @@ pub fn rotate(
             .unwrap_or_default();
         match value_for(ws, d).and_then(|v| deliver(ws, d, &v)) {
             Ok(()) => {
-                say(&mut report, format!("Updated {label}"));
+                progress(Step::Done, &format!("Updated {label}"));
                 sent.push(d.clone());
             }
             Err(e) => {
@@ -771,13 +786,13 @@ pub fn rotate(
     {
         let value = fr.field(ws)?.values[&slot].versions[pending].value.bytes();
         match connectors::verify(cmd, &value) {
-            Ok(()) => say(&mut report, format!("Verified with `{}`", cmd.join(" "))),
+            Ok(()) => progress(Step::Done, &format!("Verified with `{}`", cmd.join(" "))),
             Err(e) => failure = Some(anyhow!("verification failed: {e:#}")),
         }
     }
 
     if let Some(err) = failure {
-        say(&mut report, format!("Problem: {err:#}"));
+        progress(Step::Attention, &format!("Problem: {err:#}"));
         let undo = Undo {
             fr,
             slot: &slot,
@@ -786,7 +801,7 @@ pub fn rotate(
             sent: &sent,
             origin: origin.as_ref().map(|o| &o.spec),
         };
-        undo.run(ws, &mut report, progress);
+        let complete = undo.run(ws, progress);
         audit(
             ws,
             fr.scope,
@@ -796,9 +811,11 @@ pub fn rotate(
             Some(&slot),
             Some(format!("{err:#}")),
         );
+        if complete {
+            bail!("the rotation of {name} failed and was undone: {err:#}");
+        }
         bail!(
-            "the rotation of {name} failed and was undone:\n{}",
-            report.lines.join("\n")
+            "the rotation of {name} failed and could not be fully undone: {err:#}. The steps marked with ! say what is left"
         );
     }
 
@@ -818,30 +835,30 @@ pub fn rotate(
         Some(&slot),
         Some(format!("{} destination(s)", sent.len())),
     );
-    say(&mut report, "The new value is now the active one".into());
+    progress(Step::Done, "The new value is now the active one");
 
     // 5. Revoke the old one.
     let Some(prev) = previous else {
-        return Ok(report);
+        return Ok(());
     };
     let retry = format!("cemi revoke {name} {}{}", prev + 1, env_flag(&slot));
     if opts.keep_old {
-        say(
-            &mut report,
-            format!("The old key is still valid. Revoke it later: {retry}"),
+        progress(
+            Step::Attention,
+            &format!("The old key is still valid. Revoke it later: {retry}"),
         );
-        return Ok(report);
+        return Ok(());
     }
     match &origin {
         Some(o) => match revoke_version(ws, fr, &slot, prev, &o.spec, opts.leaked, actor) {
-            Ok(Revoked::Done) => say(
-                &mut report,
-                format!("Revoked the old key at {}", o.spec.describe()),
+            Ok(Revoked::Done) => progress(
+                Step::Done,
+                &format!("Revoked the old key at {}", o.spec.describe()),
             ),
-            Ok(Revoked::Manual(m)) => say(&mut report, format!("The old key: {m}")),
-            Err(e) => say(
-                &mut report,
-                format!("Could not revoke the old key ({e:#}). Retry with: {retry}"),
+            Ok(Revoked::Manual(m)) => progress(Step::Attention, &format!("The old key: {m}")),
+            Err(e) => progress(
+                Step::Attention,
+                &format!("Could not revoke the old key ({e:#}). Retry with: {retry}"),
             ),
         },
         None => {
@@ -854,16 +871,16 @@ pub fn rotate(
                 .memory(ws, key)
                 .map(|n| format!(". Your note: {n}"))
                 .unwrap_or_default();
-            say(
-                &mut report,
-                format!(
+            progress(
+                Step::Attention,
+                &format!(
                     "Revoke the old key at its provider by hand{}{hint}",
                     if opts.leaked { ", now: it leaked" } else { "" }
                 ),
             );
         }
     }
-    Ok(report)
+    Ok(())
 }
 
 /// What to undo after a failed rotation.
@@ -877,10 +894,15 @@ struct Undo<'a> {
 }
 
 impl Undo<'_> {
-    fn run(&self, ws: &mut Workspace, report: &mut RotateReport, progress: &mut dyn FnMut(&str)) {
-        let mut say = |s: String| {
-            progress(&s);
-            report.lines.push(s);
+    /// Puts things back as they were. Returns false when something is left
+    /// for a person to finish (each such step is reported as Attention).
+    fn run(&self, ws: &mut Workspace, progress: &mut dyn FnMut(Step, &str)) -> bool {
+        let mut complete = true;
+        let mut say = |step: Step, s: &str| {
+            if step == Step::Attention {
+                complete = false;
+            }
+            progress(step, s);
         };
         let set_states = |ws: &mut Workspace| -> Result<()> {
             let s = self
@@ -896,23 +918,32 @@ impl Undo<'_> {
             Ok(())
         };
         if let Err(e) = set_states(ws) {
-            say(format!("Could not restore the vault state: {e:#}"));
-            return;
+            say(
+                Step::Attention,
+                &format!("Could not restore the vault state: {e:#}"),
+            );
+            return false;
         }
         if self.previous.is_none() {
             let _ = save(ws, self.fr.scope);
-            say("There was no previous value to restore; the new one stays pending".into());
-            return;
+            say(
+                Step::Attention,
+                "There was no previous value to restore; the new one stays pending",
+            );
+            return false;
         }
         for d in self.sent {
             let label = destination(ws, d)
                 .map(|x| x.spec.describe())
                 .unwrap_or_default();
             match value_for(ws, d).and_then(|v| deliver(ws, d, &v)) {
-                Ok(()) => say(format!("Put the old value back in {label}")),
-                Err(e) => say(format!(
-                    "Could NOT put the old value back in {label}: {e:#}. Run `cemi push` once it is fixed"
-                )),
+                Ok(()) => say(Step::Done, &format!("Put the old value back in {label}")),
+                Err(e) => say(
+                    Step::Attention,
+                    &format!(
+                        "Could NOT put the old value back in {label}: {e:#}. Run `cemi push` once it is fixed"
+                    ),
+                ),
             }
         }
         // The new key was never used: remove it at the provider.
@@ -922,7 +953,13 @@ impl Undo<'_> {
                     let v = &f.values[self.slot].versions[self.pending];
                     (v.value.bytes(), v.provider_id.clone())
                 }
-                Err(_) => return,
+                Err(e) => {
+                    say(
+                        Step::Attention,
+                        &format!("Could not read the unused new key: {e:#}"),
+                    );
+                    return false;
+                }
             };
             match connectors::revoke(
                 origin,
@@ -937,18 +974,22 @@ impl Undo<'_> {
                         f.values.get_mut(self.slot).expect("exists").versions[self.pending].state =
                             VersionState::Retired;
                     }
-                    say("Deleted the unused new key at the provider".into());
+                    say(Step::Done, "Deleted the unused new key at the provider");
                 }
-                Ok(Revoked::Manual(m)) => say(format!("The unused new key: {m}")),
-                Err(e) => say(format!(
-                    "Could not delete the unused new key ({}); it stays pending. `cemi revoke --pending` removes it",
-                    redact_error(e, &value)
-                )),
+                Ok(Revoked::Manual(m)) => say(Step::Attention, &format!("The unused new key: {m}")),
+                Err(e) => say(
+                    Step::Attention,
+                    &format!(
+                        "Could not delete the unused new key ({}); it stays pending. `cemi revoke --pending` removes it",
+                        redact_error(e, &value)
+                    ),
+                ),
             }
         }
         if let Err(e) = save(ws, self.fr.scope) {
-            say(format!("Could not save the vault: {e:#}"));
+            say(Step::Attention, &format!("Could not save the vault: {e:#}"));
         }
+        complete
     }
 }
 

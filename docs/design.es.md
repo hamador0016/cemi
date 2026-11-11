@@ -33,12 +33,13 @@
 
 ## Estado de la implementación (v0.2, 11 nov 2026)
 
-**Hecho y probado** (30 pruebas unitarias + 17 de punta a punta, incluidas GitHub y Supabase contra un servidor falso local):
+**Hecho y probado** (30 pruebas unitarias + 17 de punta a punta, incluidas GitHub y Supabase contra un servidor falso local). El conector de GitHub se probó además contra GitHub real (un repo privado de prueba, secretos de repo y de entorno): un workflow imprimió el SHA-256 de cada secreto y coincidió con el de la bóveda después de `push`, de `rotate` y de una rotación deshecha. Supabase falta probarlo contra una cuenta real.
 
 - Orígenes (`origin set/rm`) y destinos (`dest add/ls/rm`) por campo y ambiente; comando de verificación (`verify`).
 - Conectores incluidos: `supabase-key` (origen: crea y borra llaves `sb_secret_…`), `github` (secretos de Actions y de entornos, sellados con la llave pública del repo; usa el login de `gh` si no se da `--token`), `supabase-secret` (secretos de funciones), `dotenv` (una variable de un `.env`, conservando el resto), `command` (origen: `<cmd> create`/`<cmd> revoke`; destino: el valor por stdin) y `external` (`cemi-connector-<nombre>` con JSON por stdin/stdout, en `docs/connectors.md`).
 - Huellas: cada destino guarda el SHA-256 de lo último enviado y lo que el destino reportó después; `check` distingue desactualizado, cambiado por fuera y faltante. Supabase no documenta cómo calcula su huella, así que Cemí compara la huella de Supabase consigo misma en vez de suponer el algoritmo.
-- `push`, `check`, `rotate` (pendiente → destinos, incluidas las plantillas que usan la llave → verificar → activa → revocar la vieja; si algo falla, vuelve la vieja y borra la nueva en el proveedor), `revoke` (una versión, o la pendiente), `incident` (dónde está, plantillas, el proyecto, quién la usó en 90 días, la nota "si se filtra"; `--rotate` la reemplaza como filtrada).
+- `push` le pregunta a cada destino antes de enviar: manda a los desactualizados, nunca enviados o faltantes; uno cambiado por fuera no se sobrescribe sin `--force` (puede ser una llave nueva puesta a mano).
+- `check`, `rotate` (pendiente → destinos, incluidas las plantillas que usan la llave → verificar → activa → revocar la vieja; si algo falla, vuelve la vieja y borra la nueva en el proveedor), `revoke` (una versión, o la pendiente), `incident` (dónde está, plantillas, el proyecto, quién la usó en 90 días, la nota "si se filtra"; `--rotate` la reemplaza como filtrada).
 - Ambientes protegidos (`env protect/unprotect`; por defecto `prod` y `production`): piden la contraseña. Por MCP, las herramientas `push` y `rotate` crean una solicitud que la persona aprueba con `cemi approve` (vence en 1 hora, sirve una vez). Herramienta `check` para la IA. Permisos de token `push` y `rotate`.
 - `status` y `show` muestran destinos desactualizados, rotaciones a medias, llaves viejas aún válidas y solicitudes pendientes.
 

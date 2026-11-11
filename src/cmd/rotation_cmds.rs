@@ -14,7 +14,9 @@ use crate::crypto;
 use crate::model::{ApprovalAction, Destination, Origin, SHARED, VersionState, memory_keys};
 use crate::refs::{Ref, VaultSel};
 use crate::resolve;
-use crate::rotation::{self, DestRef, FieldRef, NewValue, PushOutcome, RotateOptions, env_label};
+use crate::rotation::{
+    self, DestRef, DestStatus, FieldRef, NewValue, RotateOptions, Step, env_label,
+};
 use crate::ui;
 use crate::vault::Scope;
 
@@ -382,13 +384,47 @@ pub fn push(ctx: &mut Ctx, reference: Option<&str>, env: Option<&str>, force: bo
         println!("No destinations. Add one with `cemi dest add`");
         return Ok(0);
     }
-    let todo: Vec<DestRef> = dests
-        .into_iter()
-        .filter(|d| force || !rotation::check_one(&mut ctx.ws, d, false).status.is_ok())
-        .collect();
+    // Each destination is asked what it holds, so a value deleted or changed
+    // there is noticed, not only a vault that changed since the last push.
+    let mut todo: Vec<DestRef> = Vec::new();
+    let mut failed = 0;
+    for d in dests {
+        if force {
+            todo.push(d);
+            continue;
+        }
+        let line = rotation::check_one(&mut ctx.ws, &d, true);
+        match &line.status {
+            s if s.needs_push() => todo.push(d),
+            s if s.is_ok() => {}
+            DestStatus::ChangedOutside(m) => {
+                failed += 1;
+                ui::warn(format!(
+                    "{} ({}) → {}: changed outside Cemí ({m}), not overwritten. {}",
+                    line.field,
+                    line.env,
+                    line.describe,
+                    line.changed_outside_hint()
+                ));
+            }
+            other => {
+                failed += 1;
+                ui::warn(format!(
+                    "{} ({}) → {}: {}. `{}` sends it without checking",
+                    line.field,
+                    line.env,
+                    line.describe,
+                    other.label(),
+                    line.force_command()
+                ));
+            }
+        }
+    }
     if todo.is_empty() {
-        ui::ok("Every destination already has the current value");
-        return Ok(0);
+        if failed == 0 {
+            ui::ok("Every destination already has the current value");
+        }
+        return Ok(if failed > 0 { 1 } else { 0 });
     }
     let protected = rotation::needs_approval(&mut ctx.ws, None, &todo);
     let scope = todo[0].field.scope;
@@ -397,15 +433,13 @@ pub fn push(ctx: &mut Ctx, reference: Option<&str>, env: Option<&str>, force: bo
         print_destinations(ctx, &todo)?;
     }
     approve_here(ctx, scope, &protected, "This push", true, false)?;
-    let mut failed = 0;
     for d in &todo {
         let label = rotation::check_one(&mut ctx.ws, d, false);
-        match rotation::push_one(&mut ctx.ws, d, force, ACTOR) {
-            Ok(PushOutcome::Sent) => ui::ok(format!(
+        match rotation::push_one(&mut ctx.ws, d, ACTOR) {
+            Ok(()) => ui::ok(format!(
                 "{} ({}) → {}",
                 label.field, label.env, label.describe
             )),
-            Ok(PushOutcome::AlreadyThere) => {}
             Err(e) => {
                 failed += 1;
                 ui::warn(format!(
@@ -452,6 +486,9 @@ pub fn check(
             line.describe,
             line.status.label()
         );
+        if matches!(line.status, DestStatus::ChangedOutside(_)) {
+            println!("      {}", line.changed_outside_hint());
+        }
     }
     if let Some(f) = &only
         && !fields.contains(f)
@@ -529,7 +566,7 @@ pub fn rotate(
         }
         opts.new_value = NewValue::Given(v);
     }
-    let mut progress = |s: &str| ui::ok(s);
+    let mut progress = show_step;
     rotation::rotate(&mut ctx.ws, &fr, env, opts, ACTOR, &mut progress)?;
     Ok(0)
 }
@@ -682,7 +719,7 @@ pub fn incident(
             leaked: true,
             keep_old: false,
         };
-        let mut progress = |s: &str| ui::ok(s);
+        let mut progress = show_step;
         if let Err(e) = rotation::rotate(&mut ctx.ws, fr, env, opts, ACTOR, &mut progress) {
             failed += 1;
             ui::warn(format!("{e:#}"));
@@ -832,15 +869,27 @@ pub fn approve(ctx: &mut Ctx, id: Option<&str>, deny: bool) -> Result<i32> {
             );
             let mut failed = 0;
             for d in &dests {
-                let line = rotation::check_one(&mut ctx.ws, d, false);
-                match rotation::push_one(&mut ctx.ws, d, false, &actor) {
-                    Ok(PushOutcome::Sent) => ui::ok(format!("{} → {}", line.field, line.describe)),
-                    Ok(PushOutcome::AlreadyThere) => {
-                        ui::ok(format!("{} already had it", line.describe))
-                    }
-                    Err(e) => {
+                let line = rotation::check_one(&mut ctx.ws, d, true);
+                match &line.status {
+                    s if s.needs_push() => match rotation::push_one(&mut ctx.ws, d, &actor) {
+                        Ok(()) => ui::ok(format!("{} → {}", line.field, line.describe)),
+                        Err(e) => {
+                            failed += 1;
+                            ui::warn(format!("{}: {e:#}", line.describe));
+                        }
+                    },
+                    s if s.is_ok() => ui::ok(format!("{} already had it", line.describe)),
+                    DestStatus::ChangedOutside(m) => {
                         failed += 1;
-                        ui::warn(format!("{}: {e:#}", line.describe));
+                        ui::warn(format!(
+                            "{}: changed outside Cemí ({m}), not overwritten. {}",
+                            line.describe,
+                            line.changed_outside_hint()
+                        ));
+                    }
+                    other => {
+                        failed += 1;
+                        ui::warn(format!("{}: {}", line.describe, other.label()));
                     }
                 }
             }
@@ -878,7 +927,7 @@ pub fn approve(ctx: &mut Ctx, id: Option<&str>, deny: bool) -> Result<i32> {
                 Some(&env),
                 Some(request.requested_by.clone()),
             );
-            let mut progress = |s: &str| ui::ok(s);
+            let mut progress = show_step;
             rotation::rotate(&mut ctx.ws, &fr, env_opt, opts, &actor, &mut progress)?;
             Ok(0)
         }
@@ -919,4 +968,12 @@ pub fn protect(ctx: &mut Ctx, name: &str, on: bool) -> Result<i32> {
         format!("{name} is no longer protected")
     });
     Ok(0)
+}
+
+/// Prints one step of a rotation: ✓ when done, ! when it needs a person.
+fn show_step(step: Step, text: &str) {
+    match step {
+        Step::Done => ui::ok(text),
+        Step::Attention => ui::warn(text),
+    }
 }

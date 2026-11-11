@@ -437,6 +437,23 @@ pub fn observe(spec: &DestSpec, ws: &mut Workspace, env: Option<&str>) -> Result
     }
 }
 
+/// Explains, for people, a remote marker that differs from the one Cemí saw
+/// after its own write. The marker itself stays opaque for comparisons.
+pub fn describe_change(spec: &DestSpec, marker: &str) -> String {
+    match spec {
+        DestSpec::Github { .. } => match marker
+            .strip_prefix("updated ")
+            .and_then(|t| t.parse::<jiff::Timestamp>().ok())
+        {
+            Some(at) => format!("updated {}", crate::ui::when(at, "%Y-%m-%d %H:%M")),
+            None => marker.to_string(),
+        },
+        DestSpec::SupabaseSecret { .. } => "its digest changed".into(),
+        DestSpec::Dotenv { .. } => "the file has another value".into(),
+        DestSpec::Command { .. } | DestSpec::External { .. } => marker.to_string(),
+    }
+}
+
 /// Runs a verification command with the value on stdin; exit code 0 means
 /// the value works.
 pub fn verify(command: &[String], value: &[u8]) -> Result<()> {

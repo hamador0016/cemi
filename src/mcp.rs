@@ -24,7 +24,7 @@ use crate::crypto;
 use crate::model::{Approval, ApprovalAction, Permission, Record, Token};
 use crate::project::Project;
 use crate::refs::{Ref, VaultSel};
-use crate::rotation::{self, FieldRef, NewValue, PushOutcome, RotateOptions};
+use crate::rotation::{self, DestStatus, FieldRef, NewValue, RotateOptions};
 use crate::runner;
 use crate::ui;
 use crate::vault::{Header, Scope, Vault};
@@ -500,13 +500,19 @@ impl CemiServer {
         let actor = format!("mcp:{}", a.token.name);
         let mut out = String::new();
         for d in &dests {
-            let line = rotation::check_one(&mut a.ws, d, false);
-            match rotation::push_one(&mut a.ws, d, false, &actor) {
-                Ok(PushOutcome::Sent) => out.push_str(&format!("- sent to {}\n", line.describe)),
-                Ok(PushOutcome::AlreadyThere) => {
-                    out.push_str(&format!("- {} already had it\n", line.describe))
-                }
-                Err(e) => out.push_str(&format!("- {} failed: {e:#}\n", line.describe)),
+            let line = rotation::check_one(&mut a.ws, d, true);
+            match &line.status {
+                s if s.needs_push() => match rotation::push_one(&mut a.ws, d, &actor) {
+                    Ok(()) => out.push_str(&format!("- sent to {}\n", line.describe)),
+                    Err(e) => out.push_str(&format!("- {} failed: {e:#}\n", line.describe)),
+                },
+                s if s.is_ok() => out.push_str(&format!("- {} already had it\n", line.describe)),
+                DestStatus::ChangedOutside(m) => out.push_str(&format!(
+                    "- {} changed outside Cemí ({m}): not overwritten. A person decides: `{}` in a terminal puts the vault's value back, or `cemi set` saves the new one\n",
+                    line.describe,
+                    line.force_command()
+                )),
+                other => out.push_str(&format!("- {}: {}\n", line.describe, other.label())),
             }
         }
         Ok(out)
@@ -552,9 +558,18 @@ impl CemiServer {
             ));
         }
         let actor = format!("mcp:{}", a.token.name);
-        let mut quiet = |_: &str| {};
-        let report = rotation::rotate(&mut a.ws, &fr, Some(&p.env), opts, &actor, &mut quiet)?;
-        Ok(report.lines.join("\n"))
+        let mut steps: Vec<String> = Vec::new();
+        let mut collect = |step: rotation::Step, text: &str| {
+            let mark = match step {
+                rotation::Step::Done => "✓",
+                rotation::Step::Attention => "!",
+            };
+            steps.push(format!("{mark} {text}"));
+        };
+        match rotation::rotate(&mut a.ws, &fr, Some(&p.env), opts, &actor, &mut collect) {
+            Ok(()) => Ok(steps.join("\n")),
+            Err(e) => bail!("{e:#}\nSteps:\n{}", steps.join("\n")),
+        }
     }
 
     fn do_run(&self, p: RunParams) -> Result<String> {

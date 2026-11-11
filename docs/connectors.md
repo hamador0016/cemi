@@ -68,6 +68,12 @@ reported afterwards, so `cemi check` can tell:
 - **changed outside Cemí**: someone edited the destination directly;
 - **missing**: the destination no longer has it.
 
+`cemi push` asks each destination the same questions before sending, and sends to the ones
+that are out of date, never sent or missing. A value changed outside Cemí is not overwritten,
+because it may be a newer key someone set by hand: `cemi push --force <ref> -e <env>` puts the
+vault's value back, and `cemi set` keeps the new one. Through MCP, an AI client only reports
+these; a person decides.
+
 Values only travel over HTTPS. Plain `http://` is refused, except for `localhost`.
 
 ## Protected environments
