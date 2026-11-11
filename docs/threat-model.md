@@ -6,7 +6,8 @@ production secrets.
 ## Assets
 
 - Secret values and their history.
-- Names and notes (they reveal what you use and where).
+- Names, notes and the folders of the projects that use each vault (they reveal what you use
+  and where). They are encrypted like the values.
 - The vault key, AI tokens and the recovery code.
 
 ## What Cemí protects against

@@ -202,6 +202,7 @@ fn writes(cmd: &Cmd) -> bool {
             McpCmd::Ls | McpCmd::Launch { .. } | McpCmd::Setup { .. } | McpCmd::Serve { .. },
         ) => false,
         Cmd::Var(_) => false,
+        Cmd::Project(ProjectCmd::Ls | ProjectCmd::Add { .. }) => false,
         Cmd::Note(n) => {
             n.purpose.is_some()
                 || n.used_in.is_some()
@@ -325,6 +326,7 @@ pub fn run(cli: Cli) -> Result<i32> {
         C::Env(c) => structure::env(&mut ctx, c),
         C::Link { entity } => project_cmds::link(&mut ctx, entity.as_deref()),
         C::Var(c) => project_cmds::var(&mut ctx, c),
+        C::Project(c) => project_cmds::project(&mut ctx, c),
         C::Run {
             env,
             redact,

@@ -55,7 +55,7 @@
 
 ## Estado de la implementación (v0.3 en curso, 11 nov 2026)
 
-**Hecho y probado** (39 pruebas unitarias + 30 de punta a punta; la CI además prueba la acción de GitHub de verdad):
+**Hecho y probado** (39 pruebas unitarias + 32 de punta a punta; la CI además prueba la acción de GitHub de verdad):
 
 - `import --discover`: recorre una carpeta sin respetar `.gitignore` (los `.env` suelen estar ignorados) y salta dependencias y compilados. El ambiente sale del nombre: `.env` es para todos (como lo leen Next.js y dotenv), `.env.<ambiente>` y `.env.local` lo sobrescriben. Avisa de `.env` en git o fuera de `.gitignore`, valores repetidos entre proyectos (por SHA-256, nunca compara en claro) y archivos sin cambios en un año. Importar de nuevo no crea versiones repetidas.
 - Autocompletado con el motor dinámico de `clap_complete`: los nombres salen solo de bóvedas ya abiertas; completar nunca pide contraseña.
@@ -64,7 +64,8 @@
 - Presets como archivos TOML dentro del binario (`presets/`): next-supabase, supabase, stripe, resend, postgres. Los datos de cada proveedor se verificaron en su documentación.
 - `--json` y códigos de salida estables (`docs/scripting.md`). Los errores llevan su tipo desde donde ocurren (`errors::not_found`…) y `main` lo lee a través de cualquier contexto. Toda la salida de los comandos pasa por `outln!`.
 - `cemi prompt`: solo lo urgente (`Attention::urgent`), sin red y sin pedir contraseña.
-- `cemi ci setup/export/load` y `action.yml`. El archivo `cemi.ci.age` es texto (cabecera + base64 del archivo age).
+- `cemi ci setup/export/load` y `action.yml`. El archivo `cemi.ci.age` es texto (cabecera + base64 del archivo age). La cabecera dice el ambiente, las variables y la fecha de exportación (`# Exported:`), sin valores.
+- Mapa entre proyectos. Cada bóveda guarda objetos `project` (carpeta absoluta, cifrada a la llave pública de la bóveda). `Workspace::open` anota el proyecto de la carpeta actual si alguna referencia de su `cemi.toml` apunta a esa bóveda; como solo hace falta la llave pública, se escribe al momento también con la bóveda abierta para leer (el candado compartido deja fuera a los escritores; si dos lectores lo anotan a la vez, la copia se borra en la siguiente apertura para escribir). `import --discover` anota los proyectos que enlaza y `cemi project add` anota uno sin correr nada allí. `cemi deps` vuelve a leer el `cemi.toml` de cada proyecto y compara por id de bóveda, así sigue los archivos como están ahora. También busca plantillas, conectores que inician sesión con el valor, servidores de `mcp launch` y destinos. Para los `cemi.ci.age`, compara la fecha de exportación con la versión actual; si la versión que estaba activa al exportar ya se revocó, el aviso es urgente. La herramienta MCP `show` incluye la lista, filtrada a las entidades del token.
 
 **Cambios respecto al diseño:**
 

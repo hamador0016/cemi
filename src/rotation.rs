@@ -656,7 +656,57 @@ pub fn describe_plan(
         ),
         (false, None) => "4. Revoke the old key: by hand (it was not created by Cemí)".into(),
     });
+    out.extend(ci_copies(ws, fr, &f, &slot, opts));
     Ok(out)
+}
+
+/// `cemi.ci.age` files in known projects that hold this value: Cemí does
+/// not rewrite them, so the plan says what to do after the rotation.
+fn ci_copies(
+    ws: &mut Workspace,
+    fr: &FieldRef,
+    f: &Field,
+    slot: &str,
+    opts: &RotateOptions,
+) -> Vec<String> {
+    let current = crate::workspace::find_project_file(&ws.cwd)
+        .and_then(|p| p.parent().map(std::path::Path::to_path_buf));
+    let Ok(v) = ws.open(fr.scope) else {
+        return Vec::new();
+    };
+    let Some(rec) = v.records.get(&fr.record_id) else {
+        return Vec::new();
+    };
+    let target = crate::usage::Target::of(v, rec, Some(&fr.field));
+    let report = crate::usage::find(v, &target, current.as_deref());
+    let revokes = !opts.keep_old && f.origins.contains_key(slot);
+    let mut out = Vec::new();
+    for u in &report.uses {
+        let crate::usage::Place::Project { name, dir, ci, .. } = &u.place else {
+            continue;
+        };
+        let Some(c) = ci else { continue };
+        let Some(env) = c.env.as_deref().filter(|_| c.exists) else {
+            continue;
+        };
+        if f.slot_for(Some(env)).map(|(k, _)| k) != Some(slot) {
+            continue;
+        }
+        let file = c
+            .file
+            .file_name()
+            .map(|n| n.to_string_lossy().into_owned())
+            .unwrap_or_default();
+        out.push(format!(
+            "Not updated by Cemí: {file} in {name} holds this value for CI ({env}). Afterwards run `cemi ci export -e {env}` in {dir} and commit it.{}",
+            if revokes {
+                " CI fails from the moment the old key is revoked until then; --keep-old keeps it valid meanwhile."
+            } else {
+                ""
+            }
+        ));
+    }
+    out
 }
 
 /// How a step of a rotation went, so people see it marked as done or as

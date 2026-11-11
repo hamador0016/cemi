@@ -3,7 +3,8 @@
 //! ```text
 //! .cemi/
 //!   vault.json        header: id, KDF parameters, the wrapped vault key
-//!   objects/<id>.age  entities, records, tokens, launchers and approvals (names included)
+//!   objects/<id>.age  entities, records, tokens, launchers, approvals and known
+//!                     projects (names and paths included)
 //!   audit.log         one age-encrypted entry per line
 //!   lock              taken while reading or writing
 //!   .gitignore        "*", so git never picks the folder up
@@ -26,8 +27,8 @@ use zeroize::Zeroizing;
 
 use crate::crypto::{self, AgeKey, KdfParams, Sealed};
 use crate::model::{
-    Approval, DEFAULT_PROTECTED, Entity, Envelope, Launcher, OBJECT_FORMAT, Object, Record,
-    Sensitive, Token, validate_name,
+    Approval, DEFAULT_PROTECTED, Entity, Envelope, KnownProject, Launcher, OBJECT_FORMAT, Object,
+    Record, Sensitive, Token, validate_name,
 };
 
 pub const HEADER_FILE: &str = "vault.json";
@@ -224,10 +225,12 @@ pub struct Vault {
     pub tokens: BTreeMap<String, Token>,
     pub launchers: BTreeMap<String, Launcher>,
     pub approvals: BTreeMap<String, Approval>,
+    pub projects: BTreeMap<String, KnownProject>,
     /// Objects that could not be opened (corrupt, or encrypted to an unknown key).
     pub unreadable: Vec<String>,
     dirty: BTreeSet<String>,
     deleted: BTreeSet<String>,
+    write: bool,
     _lock: File,
 }
 
@@ -310,9 +313,11 @@ impl Vault {
             tokens: BTreeMap::new(),
             launchers: BTreeMap::new(),
             approvals: BTreeMap::new(),
+            projects: BTreeMap::new(),
             unreadable: Vec::new(),
             dirty: BTreeSet::new(),
             deleted: BTreeSet::new(),
+            write: true,
             _lock: lock,
         };
         vault.dirty.insert(root.id.clone());
@@ -360,9 +365,11 @@ impl Vault {
             tokens: BTreeMap::new(),
             launchers: BTreeMap::new(),
             approvals: BTreeMap::new(),
+            projects: BTreeMap::new(),
             unreadable: Vec::new(),
             dirty: BTreeSet::new(),
             deleted: BTreeSet::new(),
+            write,
             _lock: lock,
         };
 
@@ -408,6 +415,9 @@ impl Vault {
                             Object::Approval(a) => {
                                 vault.approvals.insert(id, a);
                             }
+                            Object::Project(p) => {
+                                vault.projects.insert(id, p);
+                            }
                         }
                     }
                     Ok(None) => still.push((id, ct)),
@@ -424,6 +434,7 @@ impl Vault {
             .unreadable
             .extend(pending.into_iter().map(|(id, _)| id));
         vault.check_tree()?;
+        vault.drop_repeated_projects();
         Ok(vault)
     }
 
@@ -495,6 +506,9 @@ impl Vault {
         }
         if let Some(a) = self.approvals.get(id) {
             return Ok((Object::Approval(a.clone()), vault_recipient));
+        }
+        if let Some(p) = self.projects.get(id) {
+            return Ok((Object::Project(p.clone()), vault_recipient));
         }
         bail!("internal error: object {id} not found")
     }
@@ -757,6 +771,66 @@ impl Vault {
         self.launchers.remove(id);
         self.dirty.remove(id);
         self.deleted.insert(id.to_string());
+    }
+
+    // ----- known projects -----
+
+    /// Remembers a project folder that uses this vault. Unlike other changes
+    /// it is written at once, also when the vault was opened for reading:
+    /// it only needs the vault's public key, and the shared lock keeps writers
+    /// out. Two readers may both add it; the copy is dropped on a later load.
+    /// Returns whether it was new.
+    pub fn remember_project(&mut self, path: &str) -> Result<bool> {
+        if self.projects.values().any(|p| p.path == path) {
+            return Ok(false);
+        }
+        let p = KnownProject {
+            id: crypto::new_id(),
+            path: path.to_string(),
+            added: Timestamp::now(),
+        };
+        let id = p.id.clone();
+        self.projects.insert(id.clone(), p);
+        let written = self
+            .object_and_recipient(&id)
+            .and_then(|(object, recipient)| {
+                let plain = Zeroizing::new(serde_json::to_vec(&Envelope {
+                    format: OBJECT_FORMAT,
+                    object,
+                })?);
+                let ct = crypto::age_encrypt(&recipient, &plain)?;
+                atomic_write(&self.dir.join(OBJECTS_DIR).join(format!("{id}.age")), &ct)
+            });
+        if let Err(e) = written {
+            self.projects.remove(&id);
+            return Err(e);
+        }
+        Ok(true)
+    }
+
+    pub fn forget_project(&mut self, id: &str) {
+        self.projects.remove(id);
+        self.dirty.remove(id);
+        self.deleted.insert(id.to_string());
+    }
+
+    /// Keeps the oldest entry of each project folder.
+    fn drop_repeated_projects(&mut self) {
+        let mut by_added: Vec<(Timestamp, String, String)> = self
+            .projects
+            .values()
+            .map(|p| (p.added, p.id.clone(), p.path.clone()))
+            .collect();
+        by_added.sort();
+        let mut seen = BTreeSet::new();
+        for (_, id, path) in by_added {
+            if !seen.insert(path) {
+                self.projects.remove(&id);
+                if self.write {
+                    self.deleted.insert(id);
+                }
+            }
+        }
     }
 
     // ----- approvals and protected environments -----

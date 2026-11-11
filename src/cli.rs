@@ -187,7 +187,7 @@ pub enum Cmd {
     /// Recurring chores, like "monthly restore test"
     #[command(subcommand)]
     Task(TaskCmd),
-    /// What uses this value (templates and this project's cemi.toml)
+    /// What uses a value or record: every project Cemí knows, templates, connectors, CI files
     Deps {
         #[arg(add = ArgValueCompleter::new(crate::complete::references))]
         reference: String,
@@ -218,6 +218,9 @@ pub enum Cmd {
     /// Variables of this project's cemi.toml
     #[command(subcommand)]
     Var(VarCmd),
+    /// The projects each vault knows, so `cemi deps` searches all of them
+    #[command(subcommand)]
+    Project(ProjectCmd),
     /// Run a command with this project's secrets injected
     Run {
         #[arg(short, long, env = "CEMI_ENV", add = ArgValueCompleter::new(crate::complete::envs))]
@@ -774,6 +777,22 @@ pub enum PresetCmd {
         /// Entity to put the records in (default: the vault's top)
         #[arg(long, add = ArgValueCompleter::new(crate::complete::entities))]
         into: Option<String>,
+    },
+}
+
+#[derive(Subcommand)]
+pub enum ProjectCmd {
+    /// Projects that use this vault (-g: the global vault)
+    Ls,
+    /// Note a project folder now, without running anything there
+    Add {
+        /// Folder with a cemi.toml (default: this one)
+        path: Option<std::path::PathBuf>,
+    },
+    /// Forget a project folder (its files are not touched)
+    Rm {
+        /// The folder, or its name as `cemi project ls` shows it
+        project: String,
     },
 }
 

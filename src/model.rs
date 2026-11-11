@@ -452,6 +452,17 @@ pub struct Launcher {
     pub created: Timestamp,
 }
 
+/// A project folder whose `cemi.toml` uses this vault. Cemí remembers it the
+/// first time it opens the vault from there, so `cemi deps` can search every
+/// project, not only the current one.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct KnownProject {
+    pub id: String,
+    /// The folder that holds `cemi.toml`, as an absolute path.
+    pub path: String,
+    pub added: Timestamp,
+}
+
 /// A change an AI client asked for in a protected environment. Nothing
 /// happens until a person runs `cemi approve`.
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -510,6 +521,7 @@ pub enum Object {
     Token(Token),
     Launcher(Launcher),
     Approval(Approval),
+    Project(KnownProject),
 }
 
 impl Object {
@@ -520,6 +532,7 @@ impl Object {
             Object::Token(t) => &t.id,
             Object::Launcher(l) => &l.id,
             Object::Approval(a) => &a.id,
+            Object::Project(p) => &p.id,
         }
     }
 }

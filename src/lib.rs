@@ -22,5 +22,6 @@ pub mod runner;
 pub mod session;
 pub mod types_gen;
 pub mod ui;
+pub mod usage;
 pub mod vault;
 pub mod workspace;

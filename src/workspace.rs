@@ -6,6 +6,7 @@ use std::path::{Path, PathBuf};
 use anyhow::{Context, Result, anyhow, bail};
 
 use crate::crypto::AgeKey;
+use crate::project::Project;
 use crate::refs::VaultSel;
 use crate::session;
 use crate::ui;
@@ -17,6 +18,26 @@ pub fn global_dir() -> Result<PathBuf> {
     }
     let home = std::env::home_dir().context("cannot find your home folder; set CEMI_HOME")?;
     Ok(home.join(".cemi"))
+}
+
+/// Windows' canonical paths start with \\?\, which people do not write.
+pub fn without_verbatim_prefix(p: PathBuf) -> PathBuf {
+    let text = p.to_string_lossy();
+    if let Some(rest) = text.strip_prefix(r"\\?\UNC\") {
+        return PathBuf::from(format!(r"\\{rest}"));
+    }
+    match text.strip_prefix(r"\\?\") {
+        Some(rest) => PathBuf::from(rest),
+        None => p,
+    }
+}
+
+/// How a project folder is remembered: absolute, without symbolic links.
+pub fn project_key(dir: &Path) -> Result<String> {
+    let full = dir
+        .canonicalize()
+        .with_context(|| format!("cannot read {}", dir.display()))?;
+    Ok(without_verbatim_prefix(full).to_string_lossy().into_owned())
 }
 
 fn same_dir(a: &Path, b: &Path) -> bool {
@@ -145,11 +166,56 @@ impl Workspace {
                 Scope::Global => self.global = Some(vault),
                 Scope::Local => self.local = Some(vault),
             }
+            if let Err(e) = self.remember_current_project(scope) {
+                ui::warn(format!(
+                    "could not note this project in the {scope} vault: {e:#}"
+                ));
+            }
         }
         Ok(match scope {
             Scope::Global => self.global.as_mut().expect("just loaded"),
             Scope::Local => self.local.as_mut().expect("just loaded"),
         })
+    }
+
+    /// Notes the project of the current folder in a vault its `cemi.toml`
+    /// uses, so `cemi deps` finds it later from anywhere.
+    fn remember_current_project(&mut self, scope: Scope) -> Result<()> {
+        let Some(file) = find_project_file(&self.cwd) else {
+            return Ok(());
+        };
+        // A cemi.toml that does not load is reported by the command that needs it.
+        let Ok(project) = Project::load(&file) else {
+            return Ok(());
+        };
+        if !self.project_uses(&project, scope) {
+            return Ok(());
+        }
+        let key = project_key(project.dir())?;
+        let v = match scope {
+            Scope::Global => self.global.as_mut(),
+            Scope::Local => self.local.as_mut(),
+        }
+        .expect("opened");
+        v.remember_project(&key)?;
+        Ok(())
+    }
+
+    /// Whether any reference of the project resolves to this vault, seen
+    /// from this workspace's folder.
+    pub fn project_uses(&self, project: &Project, scope: Scope) -> bool {
+        project
+            .file
+            .env
+            .values()
+            .chain(project.file.files.values())
+            .any(|spec| {
+                project
+                    .resolve_ref(spec.text())
+                    .ok()
+                    .and_then(|r| self.scope_for(r.vault).ok())
+                    == Some(scope)
+            })
     }
 
     pub fn open_sel(&mut self, sel: VaultSel) -> Result<&mut Vault> {

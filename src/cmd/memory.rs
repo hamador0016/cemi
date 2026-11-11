@@ -10,8 +10,7 @@ use serde_json::{Value as Json, json};
 
 use super::Ctx;
 use crate::cli::{NoteArgs, TaskCmd};
-use crate::model::{FieldKind, Record, Task, memory_keys as mk};
-use crate::refs::{Ref, VaultSel};
+use crate::model::{Record, Task, memory_keys as mk};
 use crate::resolve;
 use crate::ui;
 use crate::vault::{Scope, display_path};
@@ -49,6 +48,10 @@ pub fn status(ctx: &mut Ctx) -> Result<i32> {
         );
         let mut items = crate::cmd_shared::attention(v, None);
         items.extend(crate::rotation::attention(&mut ctx.ws, scope, None));
+        items.extend(crate::usage::ci_attention(
+            ctx.ws.get(scope).expect("opened"),
+            None,
+        ));
         for a in &items {
             crate::outln!("  ! {}: {}", a.what, a.detail);
         }
@@ -354,84 +357,50 @@ pub fn task(ctx: &mut Ctx, cmd: TaskCmd) -> Result<i32> {
     }
 }
 
-/// References inside a template text.
+/// Everything that uses a value: projects Cemí knows, templates,
+/// connectors, MCP servers, destinations and CI files.
 pub fn deps(ctx: &mut Ctx, reference: &str) -> Result<i32> {
     let r = ctx.parse_ref(reference)?;
-    let fname = r.require_field()?.to_string();
     let (scope, rec) = ctx.record(&r)?;
-    let mut found = 0;
-    let mut used_by: Vec<Json> = Vec::new();
+    if let Some(f) = &r.field
+        && rec.field(f).is_none()
     {
-        let v = ctx.ws.get(scope).expect("opened");
-        let target_entity = v.entity_path(&rec.entity);
-        for other in v.records.values() {
-            let other_entity = v.entity_path(&other.entity);
-            for f in &other.fields {
-                if f.kind != FieldKind::Template {
-                    continue;
-                }
-                for slot in f.values.values() {
-                    let Some(val) = slot.current() else { continue };
-                    let text = String::from_utf8_lossy(&val.bytes()).into_owned();
-                    for part in crate::resolve::template_refs(&text) {
-                        let parsed = if let Some(abs) = part.strip_prefix('/') {
-                            Ref::parse(abs).ok()
-                        } else {
-                            Ref::parse(&part).ok().map(|p| {
-                                let mut ents = other_entity.clone();
-                                ents.extend(p.entities.clone());
-                                Ref {
-                                    entities: ents,
-                                    ..p
-                                }
-                            })
-                        };
-                        if let Some(p) = parsed
-                            && p.vault == VaultSel::Default
-                            && p.entities == target_entity
-                            && p.record == rec.name
-                            && p.field.as_deref() == Some(fname.as_str())
-                        {
-                            found += 1;
-                            crate::outln!("template {}#{}", v.record_path(other), f.name);
-                            used_by.push(json!({
-                                "kind": "template",
-                                "reference": format!("{}#{}", v.record_path(other), f.name),
-                            }));
-                        }
-                    }
-                }
-            }
-        }
+        bail!("{} has no field {f:?}", r.record_path());
     }
-    if let Some(p) = ctx.project()? {
-        for (var, spec) in p.file.env.iter().chain(p.file.files.iter()) {
-            if let Ok(pr) = p.resolve_ref(spec.text())
-                && ctx.ws.scope_for(pr.vault).ok() == Some(scope)
-                && pr.entities == r.entities
-                && pr.record == r.record
-                && pr.field == r.field
-            {
-                found += 1;
-                crate::outln!("cemi.toml {var} ({})", p.path.display());
-                used_by.push(json!({
-                    "kind": "project",
-                    "variable": var,
-                    "file": p.path.display().to_string(),
-                }));
-            }
+    let current = ctx.project()?.map(|p| p.dir().to_path_buf());
+    let v = ctx.ws.get(scope).expect("opened");
+    let target = crate::usage::Target::of(v, &rec, r.field.as_deref());
+    let report = crate::usage::find(v, &target, current.as_deref());
+    let shown = format!(
+        "{}{}",
+        if scope == Scope::Global {
+            "global:"
+        } else {
+            "local:"
+        },
+        match &r.field {
+            Some(f) => format!("{}#{f}", v.record_path(&rec)),
+            None => v.record_path(&rec),
+        }
+    );
+    let body = crate::usage::lines(&report, r.field.is_none());
+    if body.is_empty() {
+        crate::outln!("Nothing Cemí knows uses {shown}.");
+    } else {
+        crate::outln!("{shown} is used by:");
+        for line in body {
+            crate::outln!("{line}");
         }
     }
     if let Some(used) = rec.memory.get(mk::USED_IN) {
-        crate::outln!("noted as used in: {used}");
+        crate::outln!("Noted as used in: {used}");
     }
-    if found == 0 {
-        eprintln!("Nothing in this vault or project uses {r}.");
+    for line in crate::usage::footer(&report) {
+        eprintln!("{line}");
     }
-    ui::data(json!({
-        "used_by": used_by,
-        "noted_used_in": rec.memory.get(mk::USED_IN),
-    }));
+    let mut data = crate::usage::json(&report);
+    data["noted_used_in"] = json!(rec.memory.get(mk::USED_IN));
+    ui::data(data);
     Ok(0)
 }
 
@@ -588,6 +557,10 @@ pub fn prompt(ctx: &mut Ctx) -> Result<i32> {
             Ok(v) => {
                 items.extend(crate::cmd_shared::attention(v, None));
                 items.extend(crate::rotation::attention(&mut ctx.ws, scope, None));
+                items.extend(crate::usage::ci_attention(
+                    ctx.ws.get(scope).expect("opened"),
+                    None,
+                ));
             }
             Err(_) => locked = true,
         }

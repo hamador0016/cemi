@@ -27,6 +27,7 @@ use crate::refs::{Ref, VaultSel};
 use crate::rotation::{self, DestStatus, FieldRef, NewValue, RotateOptions};
 use crate::runner;
 use crate::ui;
+use crate::usage;
 use crate::vault::{Header, Scope, Vault};
 use crate::workspace::{self, Workspace};
 
@@ -324,8 +325,31 @@ impl CemiServer {
         let mut a = self.access(false)?;
         a.require(Permission::Read)?;
         let rec = a.record(&p.record)?;
+        let allowed = a.allowed_entities();
         let v = a.vault();
-        Ok(record_summary(v, &rec))
+        let mut out = record_summary(v, &rec);
+        let current = workspace::find_project_file(&self.cwd)
+            .and_then(|f| f.parent().map(std::path::Path::to_path_buf));
+        let target = usage::Target::of(v, &rec, None);
+        let mut report = usage::find(v, &target, current.as_deref());
+        // Destinations are listed above; other records only if the token may see them.
+        report.uses.retain(|u| {
+            !matches!(u.place, usage::Place::Destination { .. })
+                && u.owner.as_ref().is_none_or(|e| allowed.contains(e))
+        });
+        let lines = usage::lines(&report, true);
+        if lines.is_empty() {
+            out.push_str("used by: nothing Cemí knows\n");
+        } else {
+            out.push_str("used by:\n");
+            for l in lines {
+                out.push_str(&format!("  {}\n", l.replace('\n', "\n  ")));
+            }
+        }
+        for l in usage::footer(&report) {
+            out.push_str(&format!("({l})\n"));
+        }
+        Ok(out)
     }
 
     fn do_search(&self, p: SearchParams) -> Result<String> {
@@ -369,6 +393,7 @@ impl CemiServer {
         let mut items = attention(v, Some(&allowed));
         let scope = a.scope;
         items.extend(rotation::attention(&mut a.ws, scope, Some(&allowed)));
+        items.extend(crate::usage::ci_attention(a.vault(), Some(&allowed)));
         if items.is_empty() {
             return Ok("Nothing needs attention.".into());
         }

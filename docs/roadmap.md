@@ -47,6 +47,9 @@ Done:
   the run.
 - `cemi prompt` for the shell prompt (Starship) with what needs doing soon, such as keys that
   expire this week.
+- `cemi deps` across projects: each vault remembers the projects that use it, so one command
+  lists every project, template, connector, MCP server, destination and CI file that uses a
+  value. `cemi status` warns about CI files with old values; `cemi rotate` lists them.
 
 Left:
 

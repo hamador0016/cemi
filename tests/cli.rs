@@ -247,6 +247,12 @@ fn mcp_server_uses_secrets_without_returning_them() {
     let (err, show) = m.call(3, "show", serde_json::json!({"record": "db"}));
     assert!(!err && !show.contains(SECRET), "{show}");
     assert!(show.contains("set (hidden)"), "{show}");
+    // Where it is used, from the project's cemi.toml and the template.
+    assert!(
+        show.contains("used by:") && show.contains("#url project: DATABASE_URL"),
+        "{show}"
+    );
+    assert!(show.contains("#password db#url"), "{show}");
     let (err, msg) = m.call(
         4,
         "run",

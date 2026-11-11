@@ -450,7 +450,7 @@ pub struct DiscoverOptions<'a> {
 pub fn discover(ctx: &mut Ctx, o: DiscoverOptions) -> Result<i32> {
     let root = std::fs::canonicalize(o.root)
         .with_context(|| format!("cannot open {}", o.root.display()))?;
-    let root = without_verbatim_prefix(root);
+    let root = crate::workspace::without_verbatim_prefix(root);
     let projects = discover::find(&root, o.depth)?;
     if projects.is_empty() {
         crate::outln!(
@@ -638,18 +638,6 @@ pub fn discover(ctx: &mut Ctx, o: DiscoverOptions) -> Result<i32> {
     Ok(if failed > 0 { 1 } else { 0 })
 }
 
-/// Windows' canonical paths start with \\?\, which people do not write.
-fn without_verbatim_prefix(p: std::path::PathBuf) -> std::path::PathBuf {
-    let text = p.to_string_lossy();
-    if let Some(rest) = text.strip_prefix(r"\\?\UNC\") {
-        return std::path::PathBuf::from(format!(r"\\{rest}"));
-    }
-    match text.strip_prefix(r"\\?\") {
-        Some(rest) => std::path::PathBuf::from(rest),
-        None => p,
-    }
-}
-
 #[allow(clippy::too_many_arguments)]
 fn import_project(
     ctx: &mut Ctx,
@@ -744,6 +732,12 @@ fn import_project(
                 file_shown.display(),
                 linked.kept.join(", ")
             ));
+        }
+        // So `cemi deps` finds this project without running cemi there first.
+        let linked_project = Project::load(&file)?;
+        let v = ctx.ws.open(scope)?;
+        if crate::usage::project_uses_vault(&linked_project, &v.header.id) {
+            v.remember_project(&crate::workspace::project_key(&p.dir)?)?;
         }
     }
     Ok(())
@@ -929,4 +923,135 @@ pub fn types(
         plural(n)
     ));
     Ok(0)
+}
+
+/// `cemi project`: the projects a vault knows, which `cemi deps` searches.
+pub fn project(ctx: &mut Ctx, cmd: crate::cli::ProjectCmd) -> Result<i32> {
+    use crate::cli::ProjectCmd;
+    use crate::usage::{project_name, project_uses_vault};
+    match cmd {
+        ProjectCmd::Ls => {
+            let scope = ctx.scope()?;
+            let v = ctx.vault()?;
+            let mut known: Vec<(String, String)> = v
+                .projects
+                .values()
+                .map(|p| (project_name(&p.path), p.path.clone()))
+                .collect();
+            known.sort_by_key(|(name, _)| name.to_lowercase());
+            let id = v.header.id.clone();
+            let mut rows = Vec::new();
+            for (name, dir) in &known {
+                let file = Path::new(dir).join(project::FILE);
+                let state = if !file.is_file() {
+                    "missing: no cemi.toml there now"
+                } else {
+                    match Project::load(&file) {
+                        Ok(p) if project_uses_vault(&p, &id) => "ok",
+                        Ok(_) => "no longer uses this vault",
+                        Err(_) => "its cemi.toml does not load",
+                    }
+                };
+                rows.push(serde_json::json!({ "name": name, "dir": dir, "state": state }));
+                if state == "ok" {
+                    crate::outln!("{name}  {dir}");
+                } else {
+                    crate::outln!("{name}  {dir}  ({state})");
+                }
+            }
+            if known.is_empty() {
+                crate::outln!(
+                    "The {scope} vault knows no projects yet. A project is noted the first time cemi opens this vault from its folder, or with `cemi project add <folder>`."
+                );
+            }
+            ui::data(serde_json::json!({ "vault": scope.to_string(), "projects": rows }));
+            Ok(0)
+        }
+        ProjectCmd::Add { path } => {
+            let start = match path {
+                Some(p) => std::fs::canonicalize(&p)
+                    .with_context(|| format!("cannot open {}", p.display()))?,
+                None => ctx.ws.cwd.clone(),
+            };
+            let dir = if start.is_file() {
+                start.parent().map(Path::to_path_buf).unwrap_or(start)
+            } else {
+                start
+            };
+            let file = dir.join(project::FILE);
+            if !file.is_file() {
+                return Err(crate::errors::not_found(format!(
+                    "{} has no cemi.toml. Create one there with `cemi init` or `cemi link`",
+                    crate::workspace::without_verbatim_prefix(dir.clone()).display()
+                )));
+            }
+            let p = Project::load(&file)?;
+            // Opening the vaults from the project's folder notes it in each
+            // vault its references use.
+            let mut ws = crate::workspace::Workspace::at(&dir, false)?;
+            let mut noted = Vec::new();
+            for scope in [Scope::Global, Scope::Local] {
+                if ws.project_uses(&p, scope) {
+                    let v = ws.open(scope)?;
+                    let key = crate::workspace::project_key(&dir)?;
+                    if v.projects.values().any(|k| k.path == key) {
+                        noted.push(scope.to_string());
+                    }
+                }
+            }
+            if noted.is_empty() {
+                bail!(
+                    "{} uses no vault yet: add a variable with `cemi var add` first",
+                    file.display()
+                );
+            }
+            ui::ok(format!(
+                "{} is known to the {} vault{}",
+                project_name(&crate::workspace::project_key(&dir)?),
+                noted.join(" and "),
+                if noted.len() == 1 { "" } else { "s" }
+            ));
+            Ok(0)
+        }
+        ProjectCmd::Rm { project: which } => {
+            let scope = ctx.scope()?;
+            let key = std::fs::canonicalize(&which).ok().map(|p| {
+                crate::workspace::without_verbatim_prefix(p)
+                    .to_string_lossy()
+                    .into_owned()
+            });
+            let v = ctx.vault()?;
+            let matches: Vec<(String, String)> = v
+                .projects
+                .values()
+                .filter(|p| {
+                    p.path == which
+                        || key.as_deref() == Some(p.path.as_str())
+                        || project_name(&p.path) == which
+                })
+                .map(|p| (p.id.clone(), p.path.clone()))
+                .collect();
+            match matches.as_slice() {
+                [] => Err(crate::errors::not_found(format!(
+                    "the {scope} vault does not know {which:?}; see `cemi project ls`"
+                ))),
+                [(id, dir)] => {
+                    v.forget_project(id);
+                    v.save()?;
+                    ui::ok(format!(
+                        "Forgot {dir}. Running cemi there again notes it again."
+                    ));
+                    Ok(0)
+                }
+                many => bail!(
+                    "{which:?} matches {} projects; give the folder:\n{}",
+                    many.len(),
+                    many.iter()
+                        .map(|(_, d)| format!("  {d}"))
+                        .collect::<Vec<_>>()
+                        .join("\n")
+                ),
+            }
+        }
+    }
 }

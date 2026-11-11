@@ -74,20 +74,56 @@ pub fn seal(p: &Payload, recipient: &age::x25519::Recipient) -> Result<String> {
     let mut out = format!(
         "# Cemí: secrets for CI ({}), encrypted to the key in cemi.toml [ci].\n\
          # Safe to commit. In CI, `cemi ci load` opens it with the secret {KEY_VAR}.\n\
-         # Variables: {}\n",
+         # Variables: {}\n\
+         # Exported: {}\n",
         p.env,
         p.vars
             .keys()
             .chain(p.files.keys())
             .cloned()
             .collect::<Vec<_>>()
-            .join(", ")
+            .join(", "),
+        p.created
     );
     for chunk in b64.as_bytes().chunks(76) {
         out.push_str(std::str::from_utf8(chunk).expect("base64 is ASCII"));
         out.push('\n');
     }
     Ok(out)
+}
+
+/// What the readable header of a CI file says, without the key.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct Header {
+    pub env: Option<String>,
+    pub vars: Vec<String>,
+    /// Missing in files written before Cemí 0.3.
+    pub exported: Option<jiff::Timestamp>,
+}
+
+pub fn read_header(text: &str) -> Header {
+    let mut h = Header {
+        env: None,
+        vars: Vec::new(),
+        exported: None,
+    };
+    for line in text.lines().take_while(|l| l.starts_with('#')) {
+        if let Some(rest) = line.strip_prefix("# Cemí: secrets for CI (")
+            && let Some((env, _)) = rest.split_once(')')
+        {
+            h.env = Some(env.to_string());
+        } else if let Some(rest) = line.strip_prefix("# Variables:") {
+            h.vars = rest
+                .split(',')
+                .map(str::trim)
+                .filter(|v| !v.is_empty())
+                .map(str::to_string)
+                .collect();
+        } else if let Some(rest) = line.strip_prefix("# Exported:") {
+            h.exported = rest.trim().parse().ok();
+        }
+    }
+    h
 }
 
 pub fn open(text: &str, key: &AgeKey) -> Result<Payload> {
@@ -213,6 +249,10 @@ mod tests {
         let text = seal(&p, &key.recipient()).unwrap();
         assert!(text.starts_with("# Cemí: secrets for CI (prod)"));
         assert!(text.contains("# Variables: API_TOKEN, GCP_KEY"));
+        let h = read_header(&text);
+        assert_eq!(h.env.as_deref(), Some("prod"));
+        assert_eq!(h.vars, ["API_TOKEN", "GCP_KEY"]);
+        assert_eq!(h.exported, Some(p.created));
         assert!(!text.contains("s3cret"));
         let back = open(&text, &key).unwrap();
         assert_eq!(back.env, "prod");

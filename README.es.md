@@ -213,9 +213,38 @@ git add cemi.ci.age cemi.toml && git commit -m "Secretos de CI"
 ```
 
 En otros CI, define `CEMI_CI_KEY` y corre `cemi ci load -- <comando>`. `--only` (o `vars` en
-`cemi.toml [ci]`) limita lo que va al CI. Después de cambiar un valor, exporta otra vez. Si la
+`cemi.toml [ci]`) limita lo que va al CI. Después de cambiar un valor, exporta otra vez
+(`cemi status` te lo recuerda). Si la
 llave del CI se filtra, reemplázala (`cemi ci setup --new-key`) y también los valores del
 archivo: las copias viejas del archivo quedan en el historial de git.
+
+## Qué usa una llave
+
+Cada bóveda recuerda los proyectos cuyo `cemi.toml` la usa (cifrado, como todo lo demás en la
+bóveda). Un proyecto queda anotado la primera vez que `cemi` abre la bóveda desde su carpeta, o
+con `cemi project add <carpeta>`. Así, una sola pregunta cubre todos los proyectos:
+
+```bash
+cemi deps global:accounts/cloudflare#token
+```
+
+```text
+global:accounts/cloudflare#token is used by:
+Projects:
+  blog: CF_TOKEN (/home/me/code/blog)
+  shop: CLOUDFLARE_API_TOKEN (/home/me/code/shop)
+    copied to cemi.ci.age (prod): out of date; run `cemi ci export -e prod` in that folder and commit it
+Connectors that sign in with it:
+  connector cloudflare-dns (destination of acme/shop/api#token)
+Copied to:
+  GitHub acme/shop: secret CLOUDFLARE_API_TOKEN (prod)
+```
+
+También muestra las plantillas armadas con el valor y los servidores MCP que arrancan con él.
+Los proyectos que Cemí no ha anotado no se revisan; `cemi project ls` muestra los que conoce.
+`cemi status` avisa cuando un `cemi.ci.age` tiene un valor viejo, y `cemi rotate` dice cuáles
+hay que exportar de nuevo. Los asistentes de IA reciben la misma lista con la herramienta MCP
+`show`, sin valores.
 
 ## Nunca subir un secreto
 
@@ -231,10 +260,10 @@ cemi scan --history      # busca tus valores en todo el historial de git
 | Bóveda | `init [-g]`, `unlock`, `lock`, `status`, `prompt`, `recovery verify/reset/new`, `passwd`, `doctor`, `log` |
 | Estructura | `ls`, `add`, `mv`, `rm`, `field add/rm/edit`, `find`, `show` |
 | Valores | `set`, `generate`, `copy` (sin argumento: buscar y elegir), `reveal`, `history`, `revert` |
-| Memoria | `note`, `task`, `deps`, `doc` |
+| Memoria | `note`, `task`, `deps` (todos los proyectos que usan un valor), `doc` |
 | Ambientes | `env ls/add/rm/diff/protect/unprotect` |
 | Rotación | `origin set/rm`, `dest add/ls/rm`, `verify`, `push`, `check`, `rotate`, `revoke`, `incident`, `approve` |
-| Proyecto | `preset ls/add`, `link`, `var add/rm/ls`, `run`, `types`, `ci setup/export/load`, `export`, `import` (`--discover` para todos tus proyectos) |
+| Proyecto | `preset ls/add`, `link`, `var add/rm/ls`, `project ls/add/rm`, `run`, `types`, `ci setup/export/load`, `export`, `import` (`--discover` para todos tus proyectos) |
 | IA | `token create/ls/revoke`, `mcp serve/setup/add/launch/ls/rm` |
 | Git | `scan`, `hook install` |
 

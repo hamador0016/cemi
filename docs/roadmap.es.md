@@ -51,6 +51,10 @@ Hecho:
   lo abre al correr.
 - `cemi prompt` para el prompt de la terminal (Starship) con lo que hay que hacer pronto, como
   llaves que vencen esta semana.
+- `cemi deps` entre proyectos: cada bóveda recuerda los proyectos que la usan, así un comando
+  muestra todos los proyectos, plantillas, conectores, servidores MCP, destinos y archivos de CI
+  que usan un valor. `cemi status` avisa de archivos de CI con valores viejos; `cemi rotate` los
+  menciona.
 
 Falta:
 

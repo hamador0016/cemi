@@ -214,9 +214,37 @@ git add cemi.ci.age cemi.toml && git commit -m "CI secrets"
 ```
 
 In other CIs, set `CEMI_CI_KEY` and run `cemi ci load -- <command>`. `--only` (or `vars` in
-`cemi.toml [ci]`) limits what goes to CI. After changing a value, export again. If the CI key
+`cemi.toml [ci]`) limits what goes to CI. After changing a value, export again (`cemi status`
+reminds you). If the CI key
 leaks, replace it (`cemi ci setup --new-key`) and the values in the file too: old copies of the
 file stay in the git history.
+
+## What uses a key
+
+Each vault remembers the projects whose `cemi.toml` uses it (encrypted, like everything else in
+the vault). A project is noted the first time `cemi` opens the vault from its folder, or with
+`cemi project add <folder>`. One question then covers every project:
+
+```bash
+cemi deps global:accounts/cloudflare#token
+```
+
+```text
+global:accounts/cloudflare#token is used by:
+Projects:
+  blog: CF_TOKEN (/home/me/code/blog)
+  shop: CLOUDFLARE_API_TOKEN (/home/me/code/shop)
+    copied to cemi.ci.age (prod): out of date; run `cemi ci export -e prod` in that folder and commit it
+Connectors that sign in with it:
+  connector cloudflare-dns (destination of acme/shop/api#token)
+Copied to:
+  GitHub acme/shop: secret CLOUDFLARE_API_TOKEN (prod)
+```
+
+It also lists templates built from the value and MCP servers started with it. Projects that
+Cemí has not noted are not searched; `cemi project ls` shows the ones it knows. `cemi status`
+warns when a `cemi.ci.age` holds an old value, and `cemi rotate` lists the ones to export again.
+AI assistants get the same list from the MCP `show` tool, without values.
 
 ## Never commit a secret
 
@@ -234,10 +262,10 @@ Unlike pattern scanners, `cemi scan` looks for *your* values, whatever their for
 | Vault | `init [-g]`, `unlock`, `lock`, `status`, `prompt`, `recovery verify/reset/new`, `passwd`, `doctor`, `log` |
 | Structure | `ls`, `add`, `mv`, `rm`, `field add/rm/edit`, `find`, `show` |
 | Values | `set`, `generate`, `copy` (no argument: search and pick), `reveal`, `history`, `revert` |
-| Memory | `note`, `task`, `deps`, `doc` |
+| Memory | `note`, `task`, `deps` (every project that uses a value), `doc` |
 | Environments | `env ls/add/rm/diff/protect/unprotect` |
 | Rotation | `origin set/rm`, `dest add/ls/rm`, `verify`, `push`, `check`, `rotate`, `revoke`, `incident`, `approve` |
-| Project | `preset ls/add`, `link`, `var add/rm/ls`, `run`, `types`, `ci setup/export/load`, `export`, `import` (`--discover` for every project) |
+| Project | `preset ls/add`, `link`, `var add/rm/ls`, `project ls/add/rm`, `run`, `types`, `ci setup/export/load`, `export`, `import` (`--discover` for every project) |
 | AI | `token create/ls/revoke`, `mcp serve/setup/add/launch/ls/rm` |
 | Git | `scan`, `hook install` |
 
