@@ -113,6 +113,16 @@ it. The environment comes from the file name: `.env` is for every environment, a
 `.env.<env>` and `.env.local` override it, the way most loaders read them. Then
 `cemi run -e dev -- <your command>` in each folder, and the `.env` files can go.
 
+## Types for your variables
+
+```bash
+cemi types -o env.d.ts                       # process.env.DATABASE_URL is a string, not string | undefined
+cemi types --format zod -o src/env.ts        # a zod schema that names every missing variable at startup
+cemi types -o env.d.ts --check               # in CI: fails when cemi.toml changed and the file did not
+```
+
+They come from `cemi.toml` alone, so they are the same on every computer and in CI.
+
 ## With an AI assistant
 
 ```bash
@@ -192,7 +202,7 @@ Unlike pattern scanners, `cemi scan` looks for *your* values, whatever their for
 | Memory | `note`, `task`, `deps`, `doc` |
 | Environments | `env ls/add/rm/diff/protect/unprotect` |
 | Rotation | `origin set/rm`, `dest add/ls/rm`, `verify`, `push`, `check`, `rotate`, `revoke`, `incident`, `approve` |
-| Project | `preset ls/add`, `link`, `var add/rm/ls`, `run`, `export`, `import` (`--discover` for every project) |
+| Project | `preset ls/add`, `link`, `var add/rm/ls`, `run`, `types`, `export`, `import` (`--discover` for every project) |
 | AI | `token create/ls/revoke`, `mcp serve/setup/add/launch/ls/rm` |
 | Git | `scan`, `hook install` |
 

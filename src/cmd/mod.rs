@@ -184,6 +184,7 @@ fn writes(cmd: &Cmd) -> bool {
         | Cmd::Doc { .. }
         | Cmd::Run { .. }
         | Cmd::Export { .. }
+        | Cmd::Types { .. }
         | Cmd::Log { .. }
         | Cmd::Scan { .. }
         | Cmd::Unlock
@@ -291,6 +292,11 @@ pub fn run(cli: Cli) -> Result<i32> {
             command,
         } => project_cmds::run(ctx, env.as_deref(), redact, &command),
         C::Export { output } => project_cmds::export(&mut ctx, output),
+        C::Types {
+            format,
+            output,
+            check,
+        } => project_cmds::types(&mut ctx, format, output, check),
         C::Import {
             path,
             discover,

@@ -360,3 +360,19 @@ fn copy_without_a_reference_needs_a_terminal() {
     assert_ne!(code, 0);
     assert!(err.contains("Give a reference"), "{err}");
 }
+
+#[test]
+fn types_follow_cemi_toml() {
+    let env = Env::new();
+    env.setup();
+    let out = env.ok(&["types"], "");
+    assert!(out.contains("      DATABASE_URL: string;"), "{out}");
+    let out = env.ok(&["types", "--format", "zod"], "");
+    assert!(out.contains("  DATABASE_URL: z.string().min(1),"), "{out}");
+    env.ok(&["types", "-o", "src/env.d.ts"], "");
+    env.ok(&["types", "-o", "src/env.d.ts", "--check"], "");
+    env.ok(&["var", "add", "DB_PASSWORD", "db#password"], "");
+    let (code, _, err) = env.run(&["types", "-o", "src/env.d.ts", "--check"], "");
+    assert_eq!(code, 1);
+    assert!(err.contains("not up to date"), "{err}");
+}

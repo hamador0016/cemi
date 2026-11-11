@@ -116,6 +116,16 @@ nombre del archivo: `.env` vale para todos, y `.env.<ambiente>` y `.env.local` l
 sobrescriben, igual que los leen la mayoría de las herramientas. Después, `cemi run -e dev --
 <tu comando>` en cada carpeta, y los `.env` se pueden borrar.
 
+## Tipos para tus variables
+
+```bash
+cemi types -o env.d.ts                       # process.env.DATABASE_URL es string, no string | undefined
+cemi types --format zod -o src/env.ts        # un esquema zod que al arrancar nombra cada variable que falte
+cemi types -o env.d.ts --check               # en CI: falla si cemi.toml cambió y el archivo no
+```
+
+Salen solo de `cemi.toml`, así que son iguales en cualquier computadora y en CI.
+
 ## Con un asistente de IA
 
 ```bash
@@ -189,7 +199,7 @@ cemi scan --history      # busca tus valores en todo el historial de git
 | Memoria | `note`, `task`, `deps`, `doc` |
 | Ambientes | `env ls/add/rm/diff/protect/unprotect` |
 | Rotación | `origin set/rm`, `dest add/ls/rm`, `verify`, `push`, `check`, `rotate`, `revoke`, `incident`, `approve` |
-| Proyecto | `preset ls/add`, `link`, `var add/rm/ls`, `run`, `export`, `import` (`--discover` para todos tus proyectos) |
+| Proyecto | `preset ls/add`, `link`, `var add/rm/ls`, `run`, `types`, `export`, `import` (`--discover` para todos tus proyectos) |
 | IA | `token create/ls/revoke`, `mcp serve/setup/add/launch/ls/rm` |
 | Git | `scan`, `hook install` |
 

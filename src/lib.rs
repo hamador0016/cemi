@@ -18,6 +18,7 @@ pub mod resolve;
 pub mod rotation;
 pub mod runner;
 pub mod session;
+pub mod types_gen;
 pub mod ui;
 pub mod vault;
 pub mod workspace;

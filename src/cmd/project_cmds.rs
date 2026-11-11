@@ -837,3 +837,52 @@ pub fn preset(ctx: &mut Ctx, cmd: crate::cli::PresetCmd) -> Result<i32> {
         }
     }
 }
+
+pub fn types(
+    ctx: &mut Ctx,
+    format: crate::types_gen::Format,
+    output: Option<std::path::PathBuf>,
+    check: bool,
+) -> Result<i32> {
+    let project = ctx.require_project()?;
+    let text = crate::types_gen::generate(&project.file, format);
+    let Some(path) = output else {
+        print!("{text}");
+        return Ok(0);
+    };
+    // Line endings may differ after a checkout on Windows.
+    let current = std::fs::read_to_string(&path)
+        .ok()
+        .map(|t| t.replace("\r\n", "\n"));
+    if check {
+        if current.as_deref() == Some(text.as_str()) {
+            ui::ok(format!("{} is up to date", path.display()));
+            return Ok(0);
+        }
+        ui::warn(format!(
+            "{} is not up to date with cemi.toml. Run: cemi types{} -o {}",
+            path.display(),
+            match format {
+                crate::types_gen::Format::Ts => "",
+                crate::types_gen::Format::Zod => " --format zod",
+            },
+            path.display()
+        ));
+        return Ok(1);
+    }
+    if current.as_deref() == Some(text.as_str()) {
+        ui::ok(format!("{} was already up to date", path.display()));
+        return Ok(0);
+    }
+    if let Some(dir) = path.parent().filter(|d| !d.as_os_str().is_empty()) {
+        std::fs::create_dir_all(dir)?;
+    }
+    crate::vault::atomic_write(&path, text.as_bytes())?;
+    let n = project.file.env.len() + project.file.files.len();
+    ui::ok(format!(
+        "Wrote {} ({n} variable{})",
+        path.display(),
+        plural(n)
+    ));
+    Ok(0)
+}

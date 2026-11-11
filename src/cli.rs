@@ -210,6 +210,21 @@ pub enum Cmd {
         #[arg(trailing_var_arg = true, required = true, value_name = "COMMAND")]
         command: Vec<String>,
     },
+    /// TypeScript types or a zod schema for this project's variables (from cemi.toml)
+    #[command(after_help = "Examples:\n  \
+        cemi types -o env.d.ts\n  \
+        cemi types --format zod -o src/env.ts\n  \
+        cemi types -o env.d.ts --check      # in CI: fails if cemi.toml changed and the file did not")]
+    Types {
+        #[arg(long, value_enum, default_value_t = crate::types_gen::Format::Ts)]
+        format: crate::types_gen::Format,
+        /// File to write (default: standard output)
+        #[arg(short, long)]
+        output: Option<std::path::PathBuf>,
+        /// Do not write: fail if the file is not up to date
+        #[arg(long, requires = "output")]
+        check: bool,
+    },
     /// Write a .env.example with this project's variable names
     Export {
         #[arg(short, long)]
