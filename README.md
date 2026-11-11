@@ -53,6 +53,18 @@ Tab completion, including your record and environment names while the vault is u
 `cemi completion powershell` (or `bash`, `zsh`, `fish`, `elvish`) prints the line for your
 shell's profile.
 
+In your prompt, `cemi prompt` prints `cemi !2` when two things need doing soon (a key that
+expires this week, a rotation that did not finish, an approval waiting, a destination out of
+date), `cemi locked` in a project whose vault is locked, and nothing otherwise. With
+[Starship](https://starship.rs):
+
+```toml
+[custom.cemi]
+command = "cemi prompt"
+when = true
+style = "bold yellow"
+```
+
 ## Quick start
 
 ```bash
@@ -196,7 +208,7 @@ Unlike pattern scanners, `cemi scan` looks for *your* values, whatever their for
 
 | Area | Commands |
 |---|---|
-| Vault | `init [-g]`, `unlock`, `lock`, `status`, `recovery verify/reset/new`, `passwd`, `doctor`, `log` |
+| Vault | `init [-g]`, `unlock`, `lock`, `status`, `prompt`, `recovery verify/reset/new`, `passwd`, `doctor`, `log` |
 | Structure | `ls`, `add`, `mv`, `rm`, `field add/rm/edit`, `find`, `show` |
 | Values | `set`, `generate`, `copy` (no argument: search and pick), `reveal`, `history`, `revert` |
 | Memory | `note`, `task`, `deps`, `doc` |

@@ -53,6 +53,18 @@ Autocompletado con Tab, incluidos los nombres de tus registros y ambientes mient
 está abierta: `cemi completion powershell` (o `bash`, `zsh`, `fish`, `elvish`) imprime la línea
 para el perfil de tu terminal.
 
+En tu prompt, `cemi prompt` imprime `cemi !2` cuando hay dos cosas que hacer pronto (una llave
+que vence esta semana, una rotación que no terminó, una aprobación esperando, un destino
+desactualizado), `cemi locked` en un proyecto cuya bóveda está cerrada, y nada en otro caso.
+Con [Starship](https://starship.rs):
+
+```toml
+[custom.cemi]
+command = "cemi prompt"
+when = true
+style = "bold yellow"
+```
+
 ## Primeros pasos
 
 ```bash
@@ -193,7 +205,7 @@ cemi scan --history      # busca tus valores en todo el historial de git
 
 | Área | Comandos |
 |---|---|
-| Bóveda | `init [-g]`, `unlock`, `lock`, `status`, `recovery verify/reset/new`, `passwd`, `doctor`, `log` |
+| Bóveda | `init [-g]`, `unlock`, `lock`, `status`, `prompt`, `recovery verify/reset/new`, `passwd`, `doctor`, `log` |
 | Estructura | `ls`, `add`, `mv`, `rm`, `field add/rm/edit`, `find`, `show` |
 | Valores | `set`, `generate`, `copy` (sin argumento: buscar y elegir), `reveal`, `history`, `revert` |
 | Memoria | `note`, `task`, `deps`, `doc` |

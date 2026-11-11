@@ -376,3 +376,26 @@ fn types_follow_cemi_toml() {
     assert_eq!(code, 1);
     assert!(err.contains("not up to date"), "{err}");
 }
+
+#[test]
+fn prompt_shows_only_what_is_due() {
+    let env = Env::new();
+    env.setup();
+    // Missing notes are not urgent: nothing to show.
+    assert_eq!(env.ok(&["prompt"], ""), "");
+    let soon = jiff::Zoned::now()
+        .date()
+        .checked_add(jiff::Span::new().days(3))
+        .unwrap();
+    env.ok(&["note", "db", "--expires", &soon.to_string()], "");
+    assert_eq!(env.ok(&["prompt"], "").trim(), "cemi !1");
+    // Locked: it says so, and never asks for the password.
+    env.ok(&["lock"], "");
+    let out = env
+        .cmd(&["prompt"])
+        .stdin(std::process::Stdio::null())
+        .output()
+        .unwrap();
+    assert!(out.status.success());
+    assert_eq!(String::from_utf8_lossy(&out.stdout).trim(), "cemi locked");
+}

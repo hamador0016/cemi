@@ -565,3 +565,47 @@ pub fn doc(ctx: &mut Ctx, entity: Option<&str>, output: Option<std::path::PathBu
 fn cell(s: &str) -> String {
     s.replace('|', "\\|").replace('\n', "<br>")
 }
+
+/// `cemi prompt`: one short line for a shell prompt. Only what needs doing
+/// soon counts (see `Attention::urgent`). It never asks for a password and
+/// never uses the network: a locked vault shows as "locked" in a project,
+/// and as nothing elsewhere.
+pub fn prompt(ctx: &mut Ctx) -> Result<i32> {
+    ui::set_non_interactive();
+    let in_project =
+        ctx.ws.local_dir.is_some() || crate::workspace::find_project_file(&ctx.ws.cwd).is_some();
+    let mut scopes = Vec::new();
+    if ctx.ws.local_dir.is_some() {
+        scopes.push(Scope::Local);
+    }
+    if ctx.ws.global_exists() {
+        scopes.push(Scope::Global);
+    }
+    let mut locked = false;
+    let mut items: Vec<crate::cmd_shared::Attention> = Vec::new();
+    for scope in scopes {
+        match ctx.ws.open(scope) {
+            Ok(v) => {
+                items.extend(crate::cmd_shared::attention(v, None));
+                items.extend(crate::rotation::attention(&mut ctx.ws, scope, None));
+            }
+            Err(_) => locked = true,
+        }
+    }
+    items.retain(|a| a.urgent);
+    let line = if !items.is_empty() {
+        format!("cemi !{}", items.len())
+    } else if locked && in_project {
+        "cemi locked".to_string()
+    } else {
+        String::new()
+    };
+    if !line.is_empty() {
+        crate::outln!("{line}");
+    }
+    ui::data(json!({
+        "locked": locked,
+        "urgent": items.iter().map(|a| json!({ "what": a.what, "detail": a.detail })).collect::<Vec<_>>(),
+    }));
+    Ok(0)
+}

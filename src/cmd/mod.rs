@@ -173,6 +173,7 @@ fn writes(cmd: &Cmd) -> bool {
     use crate::cli::*;
     match cmd {
         Cmd::Status
+        | Cmd::Prompt
         | Cmd::Doctor
         | Cmd::Ls { .. }
         | Cmd::Find { .. }
@@ -254,6 +255,7 @@ pub fn run(cli: Cli) -> Result<i32> {
         C::Unlock => vault_cmds::unlock(&mut ctx),
         C::Lock => vault_cmds::lock(&mut ctx),
         C::Status => memory::status(&mut ctx),
+        C::Prompt => memory::prompt(&mut ctx),
         C::Recovery(c) => vault_cmds::recovery(&mut ctx, c),
         C::Passwd => vault_cmds::passwd(&mut ctx),
         C::Doctor => vault_cmds::doctor(&mut ctx),

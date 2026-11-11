@@ -1106,6 +1106,7 @@ pub fn attention(
                     "{} asks to {}: `cemi approve {}`",
                     a.requested_by, a.action, a.id
                 ),
+                urgent: true,
             });
         }
     }
@@ -1123,6 +1124,7 @@ pub fn attention(
                         env_flag(slot),
                         env_flag(slot)
                     ),
+                    urgent: true,
                 });
             }
             if let Some(o) = f.origins.get(slot) {
@@ -1137,6 +1139,7 @@ pub fn attention(
                                 i + 1,
                                 env_flag(slot)
                             ),
+                            urgent: true,
                         });
                     }
                 }
@@ -1155,6 +1158,7 @@ pub fn attention(
                 out.push(Attention {
                     what: format!("{name} ({})", line.env),
                     detail: format!("{}: {}", line.describe, line.status.label()),
+                    urgent: true,
                 });
             }
         }

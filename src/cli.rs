@@ -53,6 +53,16 @@ pub enum Cmd {
     Lock,
     /// What needs attention: missing values, expirations, tasks, project problems
     Status,
+    /// One short line for your shell prompt: what needs doing soon, or "locked"
+    #[command(
+        after_help = "Prints nothing when all is well. It never asks for a password and never uses the network.\n\n\
+        Starship (~/.config/starship.toml):\n  \
+        [custom.cemi]\n  \
+        command = \"cemi prompt\"\n  \
+        when = true\n  \
+        style = \"bold yellow\""
+    )]
+    Prompt,
     /// Check or use the recovery code
     #[command(subcommand)]
     Recovery(RecoveryCmd),

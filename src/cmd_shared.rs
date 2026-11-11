@@ -18,6 +18,10 @@ fn today() -> Date {
 pub struct Attention {
     pub what: String,
     pub detail: String,
+    /// Needs doing soon: expired or expiring this week, a task due, an
+    /// unfinished rotation, an approval waiting, a destination out of date.
+    /// Missing notes and values are not urgent; `cemi status` lists them.
+    pub urgent: bool,
 }
 
 /// Everything in one vault that needs attention.
@@ -39,6 +43,7 @@ pub fn attention(v: &Vault, only: Option<&[String]>) -> Vec<Attention> {
                 out.push(Attention {
                     what: format!("{path}#{}", f.name),
                     detail: "template has no text".into(),
+                    urgent: false,
                 });
                 continue;
             }
@@ -50,6 +55,7 @@ pub fn attention(v: &Vault, only: Option<&[String]>) -> Vec<Attention> {
                 out.push(Attention {
                     what: format!("{path}#{}", f.name),
                     detail: "no value".into(),
+                    urgent: false,
                 });
             } else if !has_shared {
                 let missing: Vec<&String> = envs
@@ -71,6 +77,7 @@ pub fn attention(v: &Vault, only: Option<&[String]>) -> Vec<Attention> {
                                 .collect::<Vec<_>>()
                                 .join(", ")
                         ),
+                        urgent: false,
                     });
                 }
             }
@@ -90,6 +97,7 @@ pub fn attention(v: &Vault, only: Option<&[String]>) -> Vec<Attention> {
                                     "same secret in {} and {}",
                                     per_env[i].0, per_env[j].0
                                 ),
+                                urgent: false,
                             });
                         }
                     }
@@ -104,12 +112,14 @@ pub fn attention(v: &Vault, only: Option<&[String]>) -> Vec<Attention> {
                 out.push(Attention {
                     what: path.clone(),
                     detail: "no purpose noted (cemi note --purpose)".into(),
+                    urgent: false,
                 });
             }
             if !r.memory.contains_key(mk::BACKUP) {
                 out.push(Attention {
                     what: path.clone(),
                     detail: "no backup noted (cemi note --backup)".into(),
+                    urgent: false,
                 });
             }
         }
@@ -127,6 +137,7 @@ pub fn attention(v: &Vault, only: Option<&[String]>) -> Vec<Attention> {
                 out.push(Attention {
                     what: epath.clone(),
                     detail: format!("task \"{}\" was due {}", t.name, t.due()),
+                    urgent: true,
                 });
             }
         }
@@ -138,6 +149,7 @@ pub fn attention(v: &Vault, only: Option<&[String]>) -> Vec<Attention> {
                 "{} object(s) cannot be opened — run `cemi doctor`",
                 v.unreadable.len()
             ),
+            urgent: true,
         });
     }
     out
@@ -151,17 +163,20 @@ fn expiry(out: &mut Vec<Attention>, what: &str, text: &str, today: Date) {
                 out.push(Attention {
                     what: what.to_string(),
                     detail: format!("expired on {d}"),
+                    urgent: true,
                 });
             } else if days <= 30 {
                 out.push(Attention {
                     what: what.to_string(),
                     detail: format!("expires on {d} (in {days} days)"),
+                    urgent: days <= 7,
                 });
             }
         }
         Err(_) => out.push(Attention {
             what: what.to_string(),
             detail: format!("expires: {text:?} is not a YYYY-MM-DD date"),
+            urgent: false,
         }),
     }
 }
