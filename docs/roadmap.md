@@ -27,20 +27,31 @@ MCP server with scoped tokens, `mcp launch`, audit log, `scan` and the pre-commi
 
 *Done when:* a leaked key is replaced everywhere it is used with one command.
 
-## v0.3 — Daily use
+## v0.3 — Daily use (in progress)
+
+Done:
 
 - `cemi import --discover`: finds the `.env` files in your projects, brings them into the vault
-  and reports keys repeated across projects, old keys and `.env` files tracked by git.
-- Shell completions (PowerShell, bash, zsh, fish) that also complete record names.
+  and reports `.env` files committed to git or missing from `.gitignore`, values repeated
+  across projects, and files unchanged for a year.
+- Shell completions (PowerShell, bash, zsh, fish, elvish) that also complete record, entity and
+  environment names while the vault is unlocked.
 - Interactive picker: `cemi copy` with no arguments.
-- `cemi types`: TypeScript declarations or a zod schema generated from `cemi.toml`.
-- Presets: `cemi init --preset next-supabase` creates the usual structure with its memory notes.
-- `--json` output and stable exit codes for every command.
-- Secrets in CI without copying them by hand: `cemi export --to ci` encrypts only what CI needs
-  to a CI key, and a `cemi` GitHub Action decrypts it during the run.
+- `cemi types`: TypeScript declarations or a zod schema generated from `cemi.toml`, with
+  `--check` for CI.
+- Presets: `cemi init --preset next-supabase` (also `supabase`, `stripe`, `resend`, `postgres`)
+  creates the usual structure with its memory notes; `cemi preset add` for existing projects.
+- `--json` output and stable exit codes for every command ([docs/scripting.md](scripting.md)).
+- Secrets in CI without copying them by hand: `cemi ci export` encrypts only what CI needs to
+  a key made for CI, and the `cemi` GitHub Action (or `cemi ci load` in any CI) opens it during
+  the run.
+- `cemi prompt` for the shell prompt (Starship) with what needs doing soon, such as keys that
+  expire this week.
+
+Left:
+
 - VS Code extension: hover a variable to see its purpose, expiry and rotation steps (never the
   value); warnings for secrets written in code.
-- Prompt module (starship) with pending items, such as keys that expire this week.
 
 *Done when:* someone who installs Cemí moves their `.env` files into it on day one and keeps
 using it.

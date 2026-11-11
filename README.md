@@ -260,9 +260,10 @@ Design notes (Spanish): [docs/design.es.md](docs/design.es.md).
 
 ## Roadmap
 
-- **v0.2** (this version): rotation, with origins, destinations and approvals.
-- **v0.3**: daily use: discover existing `.env` files, shell completions, types for your code,
-  secrets in CI.
+- **v0.2**: rotation, with origins, destinations and approvals.
+- **v0.3** (in progress, mostly done): daily use: discover existing `.env` files, shell
+  completions, presets, types for your code, `--json`, secrets in CI, a prompt module. Left:
+  the VS Code extension.
 - **v0.4**: desktop app and credential proxy (the AI calls APIs without receiving the key).
 - **v0.5**: sync between your machines and sharing one entity with someone else.
 

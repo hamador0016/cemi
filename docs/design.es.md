@@ -53,6 +53,26 @@
 
 **Pendiente para publicar:** cuenta de crates.io para reservar `cemi`, y `cargo-dist` para los instaladores (npm, Homebrew, scripts). Ambos requieren instalar herramientas o crear cuentas, así que se deciden aparte.
 
+## Estado de la implementación (v0.3 en curso, 11 nov 2026)
+
+**Hecho y probado** (39 pruebas unitarias + 30 de punta a punta; la CI además prueba la acción de GitHub de verdad):
+
+- `import --discover`: recorre una carpeta sin respetar `.gitignore` (los `.env` suelen estar ignorados) y salta dependencias y compilados. El ambiente sale del nombre: `.env` es para todos (como lo leen Next.js y dotenv), `.env.<ambiente>` y `.env.local` lo sobrescriben. Avisa de `.env` en git o fuera de `.gitignore`, valores repetidos entre proyectos (por SHA-256, nunca compara en claro) y archivos sin cambios en un año. Importar de nuevo no crea versiones repetidas.
+- Autocompletado con el motor dinámico de `clap_complete`: los nombres salen solo de bóvedas ya abiertas; completar nunca pide contraseña.
+- `cemi copy` sin argumentos: buscador (dialoguer) por nombre, ambiente o propósito.
+- `cemi types`: solo lee `cemi.toml` (nunca la bóveda), así el resultado es igual en cualquier máquina; `--check` para CI. Las declaraciones se compilaron con `tsc` 5.9 en modo estricto.
+- Presets como archivos TOML dentro del binario (`presets/`): next-supabase, supabase, stripe, resend, postgres. Los datos de cada proveedor se verificaron en su documentación.
+- `--json` y códigos de salida estables (`docs/scripting.md`). Los errores llevan su tipo desde donde ocurren (`errors::not_found`…) y `main` lo lee a través de cualquier contexto. Toda la salida de los comandos pasa por `outln!`.
+- `cemi prompt`: solo lo urgente (`Attention::urgent`), sin red y sin pedir contraseña.
+- `cemi ci setup/export/load` y `action.yml`. El archivo `cemi.ci.age` es texto (cabecera + base64 del archivo age).
+
+**Cambios respecto al diseño:**
+
+- El roadmap decía `cemi export --to ci`; quedó como el grupo `cemi ci` (setup, export, load), porque son tres pasos con lugares distintos (tu máquina, el repo, el CI).
+- La acción de GitHub compila `cemi` desde el código (con caché) porque todavía no hay binarios publicados; con `cargo-dist` pasará a descargarlos.
+
+**Falta de la v0.3:** la extensión de VS Code (necesita instalar dependencias de npm: se decide aparte).
+
 ---
 
 ## Resumen

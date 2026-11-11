@@ -245,9 +245,10 @@ versiones: ver [docs/scripting.md](docs/scripting.md).
 
 ## Próximas versiones
 
-- **v0.2** (esta versión): rotación, con orígenes, destinos y aprobaciones.
-- **v0.3**: uso diario: encontrar los `.env` que ya tienes, autocompletado, tipos para tu código,
-  secretos en CI.
+- **v0.2**: rotación, con orígenes, destinos y aprobaciones.
+- **v0.3** (en curso, casi lista): uso diario: encontrar los `.env` que ya tienes,
+  autocompletado, presets, tipos para tu código, `--json`, secretos en CI, módulo para el
+  prompt. Falta: la extensión de VS Code.
 - **v0.4**: app de escritorio y proxy de credenciales (la IA llama a las API sin recibir la
   llave).
 - **v0.5**: sincronizar entre tus máquinas y compartir una entidad con otra persona.
