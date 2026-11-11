@@ -17,7 +17,7 @@ fn show_recovery_code(code: &str) {
     eprintln!("RECOVERY CODE — shown only this once:");
     eprintln!();
     // The code goes to stdout so it can be piped straight into a password manager.
-    println!("{code}");
+    crate::outln!("{code}");
     eprintln!();
     eprintln!("Keep it in your password manager or on paper. With it you can open the vault");
     eprintln!("if you forget the password. Without both, the vault cannot be opened by anyone.");
@@ -272,11 +272,11 @@ pub fn passwd(ctx: &mut Ctx) -> Result<i32> {
 
 pub fn doctor(ctx: &mut Ctx) -> Result<i32> {
     let mut problems = 0;
-    println!("cemi {}", env!("CARGO_PKG_VERSION"));
+    crate::outln!("cemi {}", env!("CARGO_PKG_VERSION"));
     let gdir = &ctx.ws.global_dir;
     if ctx.ws.global_exists() {
         let h = Header::read(gdir)?;
-        println!(
+        crate::outln!(
             "Global vault: {} ({})",
             gdir.display(),
             if session::is_open(&h.id) {
@@ -286,7 +286,7 @@ pub fn doctor(ctx: &mut Ctx) -> Result<i32> {
             }
         );
     } else {
-        println!("Global vault: none (create with `cemi init --global`)");
+        crate::outln!("Global vault: none (create with `cemi init --global`)");
     }
     match &ctx.ws.local_dir {
         Some(dir) => {
@@ -298,7 +298,7 @@ pub fn doctor(ctx: &mut Ctx) -> Result<i32> {
             } else {
                 "has its own password"
             };
-            println!(
+            crate::outln!(
                 "Local vault: {} ({}; {how})",
                 dir.display(),
                 if session::is_open(&h.id) {
@@ -308,18 +308,18 @@ pub fn doctor(ctx: &mut Ctx) -> Result<i32> {
                 }
             );
             if !dir.join(".gitignore").exists() {
-                println!(
+                crate::outln!(
                     "  ! {}/.gitignore is missing; git could pick the vault up",
                     dir.display()
                 );
                 problems += 1;
             }
         }
-        None => println!("Local vault: none in this folder"),
+        None => crate::outln!("Local vault: none in this folder"),
     }
     match workspace::find_project_file(&ctx.ws.cwd) {
         Some(p) => match project::Project::load(&p) {
-            Ok(proj) => println!(
+            Ok(proj) => crate::outln!(
                 "Project: {} ({} variables, {} files, {} AI commands)",
                 p.display(),
                 proj.file.env.len(),
@@ -327,11 +327,11 @@ pub fn doctor(ctx: &mut Ctx) -> Result<i32> {
                 proj.file.ai.commands.len()
             ),
             Err(e) => {
-                println!("Project: {} — ! {e:#}", p.display());
+                crate::outln!("Project: {} — ! {e:#}", p.display());
                 problems += 1;
             }
         },
-        None => println!("Project: no cemi.toml here"),
+        None => crate::outln!("Project: no cemi.toml here"),
     }
     for scope in [Scope::Global, Scope::Local] {
         if ctx.ws.dir(scope).is_err() {
@@ -343,7 +343,7 @@ pub fn doctor(ctx: &mut Ctx) -> Result<i32> {
             continue;
         }
         let v = ctx.ws.open(scope)?;
-        println!(
+        crate::outln!(
             "  {scope}: {} entities, {} records, {} tokens",
             v.entities.len() - 1,
             v.records.len(),
@@ -351,17 +351,17 @@ pub fn doctor(ctx: &mut Ctx) -> Result<i32> {
         );
         if !v.unreadable.is_empty() {
             problems += 1;
-            println!(
+            crate::outln!(
                 "  ! {} object file(s) cannot be opened: {}",
                 v.unreadable.len(),
                 v.unreadable.join(", ")
             );
-            println!(
+            crate::outln!(
                 "    They may be damaged or come from another vault. Restore them from a backup of the folder."
             );
         }
         if v.header.kdf != KdfParams::STRONG {
-            println!("  ! weak password-derivation settings (test vault?)");
+            crate::outln!("  ! weak password-derivation settings (test vault?)");
         }
     }
     if problems == 0 {
@@ -376,6 +376,17 @@ pub fn log(ctx: &mut Ctx, limit: usize, verify: bool) -> Result<i32> {
     let key = ctx.ws.master_key(scope)?;
     let read = audit::read(&dir, &key).context("cannot read the audit log")?;
     let start = read.entries.len().saturating_sub(limit);
+    ui::data(serde_json::json!({
+        "entries": read.entries[start..].iter().map(|e| serde_json::json!({
+            "at": e.at.to_string(),
+            "actor": e.actor,
+            "action": e.action,
+            "target": e.target,
+            "env": e.env,
+            "detail": e.detail,
+        })).collect::<Vec<_>>(),
+        "chain_intact": verify.then_some(read.broken.is_empty()),
+    }));
     for e in &read.entries[start..] {
         let mut line = format!(
             "{}  {:<14} {:<18}",
@@ -392,7 +403,7 @@ pub fn log(ctx: &mut Ctx, limit: usize, verify: bool) -> Result<i32> {
         if let Some(d) = &e.detail {
             line.push_str(&format!(" — {d}"));
         }
-        println!("{line}");
+        crate::outln!("{line}");
     }
     if verify {
         if read.broken.is_empty() {

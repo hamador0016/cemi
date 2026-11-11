@@ -564,9 +564,9 @@ impl Vault {
     }
 
     pub fn find_entity_id(&self, path: &[String]) -> Result<String> {
-        self.find_entity(path)
-            .map(|e| e.id.clone())
-            .ok_or_else(|| anyhow!("entity not found: {}", display_path(path)))
+        self.find_entity(path).map(|e| e.id.clone()).ok_or_else(|| {
+            crate::errors::not_found(format!("entity not found: {}", display_path(path)))
+        })
     }
 
     /// Returns the entity at `path`, creating any missing entity on the way.
@@ -651,14 +651,14 @@ impl Vault {
     }
 
     pub fn find_record(&self, entities: &[String], name: &str) -> Result<&Record> {
-        let entity = self
-            .find_entity(entities)
-            .ok_or_else(|| anyhow!("entity not found: {}", display_path(entities)))?;
+        let entity = self.find_entity(entities).ok_or_else(|| {
+            crate::errors::not_found(format!("entity not found: {}", display_path(entities)))
+        })?;
         self.find_record_in(&entity.id, name).ok_or_else(|| {
-            anyhow!(
+            crate::errors::not_found(format!(
                 "record not found: {}",
                 display_path(&[entities, &[name.to_string()]].concat())
-            )
+            ))
         })
     }
 

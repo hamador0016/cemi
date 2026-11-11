@@ -187,14 +187,22 @@ pub fn scan(ctx: &mut Ctx, path: Option<PathBuf>, staged: bool, history: bool) -
             scan_bytes(&n, &shown, &data, &mut findings);
         }
     }
+    ui::data(serde_json::json!({
+        "vault_files": vault_files,
+        "findings": findings.iter().map(|f| serde_json::json!({
+            "place": f.place,
+            "line": (!history).then_some(f.line),
+            "secret": f.secret,
+        })).collect::<Vec<_>>(),
+    }));
     for f in &vault_files {
-        println!("! {f}: this is a vault file; never commit .cemi/");
+        crate::outln!("! {f}: this is a vault file; never commit .cemi/");
     }
     for f in &findings {
         if history {
-            println!("! {}: value of {}", f.place, f.secret);
+            crate::outln!("! {}: value of {}", f.place, f.secret);
         } else {
-            println!("! {}:{}: value of {}", f.place, f.line, f.secret);
+            crate::outln!("! {}:{}: value of {}", f.place, f.line, f.secret);
         }
     }
     if findings.is_empty() && vault_files.is_empty() {

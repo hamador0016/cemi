@@ -93,13 +93,13 @@ fn show(label: &str, bytes: &[u8], secrets: &[&[u8]]) {
 }
 
 fn failed(argv: &[String], ran: &Ran) -> anyhow::Error {
-    anyhow!(
+    crate::errors::external(format!(
         "`{}` failed{}",
         argv.join(" "),
         ran.code
             .map(|c| format!(" with exit code {c}"))
             .unwrap_or_default()
-    )
+    ))
 }
 
 pub fn origin_create(argv: &[String]) -> Result<NewKey> {

@@ -201,7 +201,7 @@ impl Workspace {
                 eprintln!("Wrong password.");
             }
         }
-        bail!("wrong password")
+        Err(crate::errors::locked("wrong password"))
     }
 
     pub fn save_all(&mut self) -> Result<()> {

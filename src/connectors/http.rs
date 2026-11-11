@@ -2,7 +2,7 @@
 
 use std::time::Duration;
 
-use anyhow::{Context, Result, anyhow, bail};
+use anyhow::{Context, Result, bail};
 use serde::de::DeserializeOwned;
 
 pub struct Response {
@@ -33,7 +33,10 @@ impl Response {
             429 => " Too many requests: try again in a minute.",
             _ => "",
         };
-        anyhow!("{what} failed (HTTP {}): {msg}.{hint}", self.status)
+        crate::errors::external(format!(
+            "{what} failed (HTTP {}): {msg}.{hint}",
+            self.status
+        ))
     }
 }
 
@@ -84,7 +87,7 @@ pub fn request(
     let host = url.split('/').nth(2).unwrap_or(url).to_string();
     let mut resp = agent
         .run(req)
-        .map_err(|e| anyhow!("cannot reach {host}: {e}"))?;
+        .map_err(|e| crate::errors::external(format!("cannot reach {host}: {e}")))?;
     let status = resp.status().as_u16();
     let body = resp
         .body_mut()

@@ -205,6 +205,9 @@ cemi scan --history      # busca tus valores en todo el historial de git
 
 Las referencias tienen la forma `[global:|local:]entidad/registro#campo`.
 
+Para scripts y CI, todos los comandos aceptan `--json`, y los códigos de salida no cambian entre
+versiones: ver [docs/scripting.md](docs/scripting.md).
+
 ## Próximas versiones
 
 - **v0.2** (esta versión): rotación, con orígenes, destinos y aprobaciones.

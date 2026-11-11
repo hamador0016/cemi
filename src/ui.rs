@@ -9,6 +9,14 @@ use anyhow::{Context, Result, bail};
 use zeroize::Zeroizing;
 
 static PASSWORD_STDIN: Mutex<bool> = Mutex::new(false);
+static JSON: Mutex<Option<JsonOut>> = Mutex::new(None);
+
+/// What a command produced, collected in `--json` mode.
+#[derive(Default)]
+struct JsonOut {
+    text: String,
+    data: Option<serde_json::Value>,
+}
 static NON_INTERACTIVE: Mutex<bool> = Mutex::new(false);
 
 /// For processes started by AI clients: never ask for a password.
@@ -38,7 +46,9 @@ fn read_stdin_line() -> Result<Zeroizing<String>> {
 /// Asks for a password without echoing it.
 pub fn password(prompt: &str) -> Result<Zeroizing<String>> {
     if *NON_INTERACTIVE.lock().expect("not poisoned") {
-        bail!("the vault is locked. Ask the human to run `cemi unlock` in a terminal");
+        return Err(crate::errors::locked(
+            "the vault is locked. Ask the human to run `cemi unlock` in a terminal",
+        ));
     }
     if password_from_stdin() {
         let pw = read_stdin_line()?;
@@ -49,9 +59,9 @@ pub fn password(prompt: &str) -> Result<Zeroizing<String>> {
     }
     match rpassword::prompt_password(prompt) {
         Ok(p) => Ok(Zeroizing::new(p)),
-        Err(_) => bail!(
-            "there is no terminal to ask for the password. Run `cemi unlock` in a terminal first, or pass --password-stdin"
-        ),
+        Err(_) => Err(crate::errors::locked(
+            "there is no terminal to ask for the password. Run `cemi unlock` in a terminal first, or pass --password-stdin",
+        )),
     }
 }
 
@@ -133,4 +143,76 @@ pub fn ok(msg: impl AsRef<str>) {
 
 pub fn warn(msg: impl AsRef<str>) {
     eprintln!("! {}", msg.as_ref());
+}
+
+// ----- output -----
+//
+// Commands write their output with `outln!`/`out!` instead of `println!`.
+// Normally that is standard output. With `--json`, it is collected, and the
+// command ends by printing one JSON object (see [`finish_json`]). Messages
+// for people (`ok`, `warn`, prompts) always go to standard error.
+
+/// `--json`: collect the output instead of printing it.
+pub fn use_json() {
+    *JSON.lock().expect("not poisoned") = Some(JsonOut::default());
+}
+
+pub fn json_mode() -> bool {
+    JSON.lock().expect("not poisoned").is_some()
+}
+
+pub fn out_text(text: &str) {
+    match JSON.lock().expect("not poisoned").as_mut() {
+        Some(j) => j.text.push_str(text),
+        None => {
+            use std::io::Write;
+            let mut stdout = std::io::stdout().lock();
+            let _ = stdout.write_all(text.as_bytes());
+            let _ = stdout.flush();
+        }
+    }
+}
+
+/// The structured result of a command, for `--json`. Ignored otherwise.
+pub fn data(value: serde_json::Value) {
+    if let Some(j) = JSON.lock().expect("not poisoned").as_mut() {
+        j.data = Some(value);
+    }
+}
+
+/// Prints the JSON object of `--json` mode: `ok`, `exit_code`, the command's
+/// `data` (or `null`), its `text` output, and `error` when it failed.
+pub fn finish_json(code: i32, error: Option<(&str, String)>) {
+    let Some(j) = JSON.lock().expect("not poisoned").take() else {
+        return;
+    };
+    let mut obj = serde_json::json!({
+        "ok": error.is_none() && code == 0,
+        "exit_code": code,
+        "data": j.data,
+        "text": j.text,
+    });
+    if let Some((kind, message)) = error {
+        obj["error"] = serde_json::json!({ "kind": kind, "message": message });
+    }
+    println!("{obj}");
+}
+
+/// Like `println!`, through [`out_text`].
+#[macro_export]
+macro_rules! outln {
+    () => {
+        $crate::ui::out_text("\n")
+    };
+    ($($arg:tt)*) => {
+        $crate::ui::out_text(&format!("{}\n", format_args!($($arg)*)))
+    };
+}
+
+/// Like `print!`, through [`out_text`].
+#[macro_export]
+macro_rules! out {
+    ($($arg:tt)*) => {
+        $crate::ui::out_text(&format!($($arg)*))
+    };
 }

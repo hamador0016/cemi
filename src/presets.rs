@@ -5,7 +5,7 @@
 
 use std::collections::BTreeMap;
 
-use anyhow::{Context, Result, anyhow, bail};
+use anyhow::{Context, Result, bail};
 use serde::Deserialize;
 
 use crate::model::{Field, FieldKind, SHARED, Value, validate_name};
@@ -64,10 +64,10 @@ pub fn names() -> Vec<&'static str> {
 
 pub fn get(name: &str) -> Result<Preset> {
     let (n, text) = FILES.iter().find(|(n, _)| *n == name).ok_or_else(|| {
-        anyhow!(
+        crate::errors::not_found(format!(
             "there is no preset {name:?}. Available: {}",
             names().join(", ")
-        )
+        ))
     })?;
     let mut p: Preset = toml::from_str(text).with_context(|| format!("preset {n} is invalid"))?;
     p.name = n.to_string();

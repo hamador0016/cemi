@@ -5,6 +5,7 @@ use std::collections::BTreeMap;
 
 use anyhow::{Result, anyhow, bail};
 use jiff::Timestamp;
+use serde_json::{Value as Json, json};
 use zeroize::Zeroizing;
 
 use super::Ctx;
@@ -58,9 +59,9 @@ fn credential_ref(ctx: &mut Ctx, text: &str, key_scope: Scope) -> Result<String>
     let v = ctx.ws.open(scope)?;
     let rec = v.find_record(&r.entities, &r.record)?;
     let f = r.require_field()?;
-    let field = rec
-        .field(f)
-        .ok_or_else(|| anyhow!("{} has no field {f:?}", r.record_path()))?;
+    let field = rec.field(f).ok_or_else(|| {
+        crate::errors::not_found(format!("{} has no field {f:?}", r.record_path()))
+    })?;
     if !field.secret {
         ui::warn(format!(
             "{r} is not marked secret; credentials usually are (cemi field edit {r} --secret true)"
@@ -108,8 +109,15 @@ fn approve_here(
             scope,
             &format!("{what} changes {} (protected)", protected.join(", ")),
         )?;
-    } else if ask && !yes && !ui::confirm("Go ahead?") {
-        bail!("cancelled");
+    } else if ask && !yes {
+        if !std::io::IsTerminal::is_terminal(&std::io::stdin()) {
+            return Err(crate::errors::needs_person(format!(
+                "{what} needs a yes: run it in a terminal, or pass --yes"
+            )));
+        }
+        if !ui::confirm("Go ahead?") {
+            bail!("cancelled");
+        }
     }
     Ok(())
 }
@@ -282,7 +290,7 @@ pub fn dest(ctx: &mut Ctx, cmd: DestCmd) -> Result<i32> {
             };
             let dests = rotation::all_destinations(&mut ctx.ws, only.as_ref(), None)?;
             if dests.is_empty() {
-                println!(
+                crate::outln!(
                     "No destinations yet. Add one with `cemi dest add <record#field> -e <env> <kind> …`"
                 );
                 return Ok(0);
@@ -316,10 +324,11 @@ pub fn dest(ctx: &mut Ctx, cmd: DestCmd) -> Result<i32> {
 
 fn print_destinations(ctx: &mut Ctx, dests: &[DestRef]) -> Result<()> {
     let mut last_field = String::new();
+    let mut list: Vec<Json> = Vec::new();
     for d in dests {
         let name = d.field.text(&mut ctx.ws);
         if name != last_field {
-            println!("{name}");
+            crate::outln!("{name}");
             last_field = name;
         }
         let field = d.field.field(&mut ctx.ws)?;
@@ -330,13 +339,21 @@ fn print_destinations(ctx: &mut Ctx, dests: &[DestRef]) -> Result<()> {
             Some(l) => format!("last sent {}", ui::when(l.at, "%Y-%m-%d %H:%M")),
             None => "never sent".into(),
         };
-        println!(
+        crate::outln!(
             "  [{}] {:<16} {}  ({sent})",
             x.id,
             env_label(&x.env),
             x.spec.describe()
         );
+        list.push(json!({
+            "field": last_field,
+            "id": x.id,
+            "env": env_label(&x.env),
+            "destination": x.spec.describe(),
+            "last_sent": x.last.as_ref().map(|l| l.at.to_string()),
+        }));
     }
+    ui::data(json!({ "destinations": list }));
     Ok(())
 }
 
@@ -381,7 +398,7 @@ pub fn push(ctx: &mut Ctx, reference: Option<&str>, env: Option<&str>, force: bo
     };
     let dests = rotation::all_destinations(&mut ctx.ws, only.as_ref(), env)?;
     if dests.is_empty() {
-        println!("No destinations. Add one with `cemi dest add`");
+        crate::outln!("No destinations. Add one with `cemi dest add`");
         return Ok(0);
     }
     // Each destination is asked what it holds, so a value deleted or changed
@@ -429,7 +446,7 @@ pub fn push(ctx: &mut Ctx, reference: Option<&str>, env: Option<&str>, force: bo
     let protected = rotation::needs_approval(&mut ctx.ws, None, &todo);
     let scope = todo[0].field.scope;
     if !protected.is_empty() {
-        println!("Will send:");
+        crate::outln!("Will send:");
         print_destinations(ctx, &todo)?;
     }
     approve_here(ctx, scope, &protected, "This push", true, false)?;
@@ -464,6 +481,8 @@ pub fn check(
     };
     let dests = rotation::all_destinations(&mut ctx.ws, only.as_ref(), env)?;
     let mut problems = 0;
+    let mut checks: Vec<Json> = Vec::new();
+    let mut origins: Vec<Json> = Vec::new();
     let mut last_field = String::new();
     let mut fields: Vec<FieldRef> = Vec::new();
     for d in &dests {
@@ -471,15 +490,24 @@ pub fn check(
             fields.push(d.field.clone());
         }
         let line = rotation::check_one(&mut ctx.ws, d, !offline);
+        checks.push(json!({
+            "field": line.field,
+            "env": line.env,
+            "id": line.id,
+            "destination": line.describe,
+            "status": line.status.key(),
+            "ok": line.status.is_ok(),
+            "detail": line.status.label(),
+        }));
         if line.field != last_field {
-            println!("{}", line.field);
+            crate::outln!("{}", line.field);
             last_field = line.field.clone();
         }
         let mark = if line.status.is_ok() { "✓" } else { "!" };
         if !line.status.is_ok() {
             problems += 1;
         }
-        println!(
+        crate::outln!(
             "  {mark} [{}] {:<16} {} — {}",
             line.id,
             line.env,
@@ -487,7 +515,7 @@ pub fn check(
             line.status.label()
         );
         if matches!(line.status, DestStatus::ChangedOutside(_)) {
-            println!("      {}", line.changed_outside_hint());
+            crate::outln!("      {}", line.changed_outside_hint());
         }
     }
     if let Some(f) = &only
@@ -505,22 +533,27 @@ pub fn check(
                 match rotation::origin_problem(&mut ctx.ws, fr, &slot) {
                     Ok(Some(p)) => {
                         problems += 1;
-                        println!("  ! {}: {p}", fr.text(&mut ctx.ws));
+                        let name = fr.text(&mut ctx.ws);
+                        crate::outln!("  ! {name}: {p}");
+                        origins.push(json!({ "field": name, "problem": p }));
                     }
                     Ok(None) => {}
                     Err(e) => {
                         problems += 1;
-                        println!("  ! {} origin: {e:#}", fr.text(&mut ctx.ws));
+                        let name = fr.text(&mut ctx.ws);
+                        crate::outln!("  ! {name} origin: {e:#}");
+                        origins.push(json!({ "field": name, "problem": format!("{e:#}") }));
                     }
                 }
             }
         }
     }
     if dests.is_empty() {
-        println!("No destinations to check. Add one with `cemi dest add`");
+        crate::outln!("No destinations to check. Add one with `cemi dest add`");
     } else if problems == 0 {
         ui::ok("Every destination has the current value");
     }
+    ui::data(json!({ "problems": problems, "destinations": checks, "origins": origins }));
     Ok(if problems > 0 { 1 } else { 0 })
 }
 
@@ -553,7 +586,7 @@ pub fn rotate(
         keep_old,
     };
     for line in rotation::describe_plan(&mut ctx.ws, &fr, env, &opts)? {
-        println!("{line}");
+        crate::outln!("{line}");
     }
     let slot = rotation::slot_key(&mut ctx.ws, &fr, env)?;
     let dests = rotation::affected(&mut ctx.ws, &fr, &slot)?;
@@ -648,17 +681,17 @@ pub fn incident(
     }
     for (r, fr) in &targets {
         let slot = rotation::slot_key(&mut ctx.ws, fr, env)?;
-        println!("{r} ({})", env_label(&slot));
+        crate::outln!("{r} ({})", env_label(&slot));
         let field = fr.field(&mut ctx.ws)?.clone();
         match field.origins.get(&slot) {
-            Some(o) => println!("  created at: {}", o.spec.describe()),
-            None => println!("  origin: unknown to Cemí (rotate with --paste or --generate)"),
+            Some(o) => crate::outln!("  created at: {}", o.spec.describe()),
+            None => crate::outln!("  origin: unknown to Cemí (rotate with --paste or --generate)"),
         }
         let dests = rotation::affected(&mut ctx.ws, fr, &slot)?;
         if dests.is_empty() {
-            println!("  copied to: no destinations known to Cemí");
+            crate::outln!("  copied to: no destinations known to Cemí");
         } else {
-            println!("  copied to:");
+            crate::outln!("  copied to:");
             for d in &dests {
                 let line = rotation::check_one(&mut ctx.ws, d, false);
                 let via = if d.field == *fr {
@@ -666,11 +699,11 @@ pub fn incident(
                 } else {
                     format!(" (inside {})", line.field)
                 };
-                println!("    - {} ({}){via}", line.describe, line.env);
+                crate::outln!("    - {} ({}){via}", line.describe, line.env);
             }
         }
         for dep in rotation::dependents(&mut ctx.ws, fr)? {
-            println!("  part of: {}", dep.text(&mut ctx.ws));
+            crate::outln!("  part of: {}", dep.text(&mut ctx.ws));
         }
         if let Some(p) = ctx.project()? {
             for (var, spec) in p.file.env.iter().chain(p.file.files.iter()) {
@@ -680,7 +713,7 @@ pub fn incident(
                     && pr.record == r.record
                     && pr.field == r.field
                 {
-                    println!("  this project: ${var} ({})", p.path.display());
+                    crate::outln!("  this project: ${var} ({})", p.path.display());
                 }
             }
         }
@@ -693,11 +726,11 @@ pub fn incident(
                 .cloned()
         };
         if let Some(n) = note {
-            println!("  your note if it leaks: {n}");
+            crate::outln!("  your note if it leaks: {n}");
         }
     }
     if !rotate {
-        println!(
+        crate::outln!(
             "\nA leaked key stays dangerous until it is replaced. Rotate: cemi incident {} {}--rotate",
             references.join(" "),
             env.map(|e| format!("-e {e} ")).unwrap_or_default()
@@ -713,7 +746,7 @@ pub fn incident(
     approve_here(ctx, targets[0].1.scope, &protected, "Rotating", yes, true)?;
     let mut failed = 0;
     for (r, fr) in &targets {
-        println!("\nRotating {r}");
+        crate::outln!("\nRotating {r}");
         let opts = RotateOptions {
             new_value: NewValue::Origin,
             leaked: true,
@@ -755,11 +788,11 @@ fn print_usage(ctx: &mut Ctx, scope: Scope, r: &Ref) -> Result<()> {
         }
     }
     if by_actor.is_empty() {
-        println!("  used through Cemí in the last 90 days: no record");
+        crate::outln!("  used through Cemí in the last 90 days: no record");
     } else {
-        println!("  used through Cemí in the last 90 days:");
+        crate::outln!("  used through Cemí in the last 90 days:");
         for (actor, (n, last)) in by_actor {
-            println!(
+            crate::outln!(
                 "    - {actor}: {n} time(s), last {}",
                 ui::when(last, "%Y-%m-%d %H:%M")
             );
@@ -797,13 +830,21 @@ pub fn approve(ctx: &mut Ctx, id: Option<&str>, deny: bool) -> Result<i32> {
     }
     let Some(id) = id else {
         let mut n = 0;
+        let mut requests: Vec<Json> = Vec::new();
         for scope in &scopes {
             let v = ctx.ws.open(*scope)?;
             let mut list: Vec<_> = v.approvals.values().cloned().collect();
             list.sort_by_key(|a| a.created);
             for a in list {
                 n += 1;
-                println!(
+                requests.push(json!({
+                    "id": a.id,
+                    "requested_by": a.requested_by,
+                    "action": a.action.to_string(),
+                    "created": a.created.to_string(),
+                    "expires": a.expires.to_string(),
+                }));
+                crate::outln!(
                     "{}  {} asked to {}  ({}, expires {})",
                     a.id,
                     a.requested_by,
@@ -813,10 +854,11 @@ pub fn approve(ctx: &mut Ctx, id: Option<&str>, deny: bool) -> Result<i32> {
                 );
             }
         }
+        ui::data(json!({ "requests": requests }));
         if n == 0 {
-            println!("No requests waiting.");
+            crate::outln!("No requests waiting.");
         } else {
-            println!(
+            crate::outln!(
                 "\nApprove one with `cemi approve <id>`, or refuse it with `cemi approve <id> --deny`."
             );
         }
@@ -829,8 +871,11 @@ pub fn approve(ctx: &mut Ctx, id: Option<&str>, deny: bool) -> Result<i32> {
             found = Some((*scope, a.clone()));
         }
     }
-    let (scope, request) = found
-        .ok_or_else(|| anyhow!("no request {id} (it may have expired); see `cemi approve`"))?;
+    let (scope, request) = found.ok_or_else(|| {
+        crate::errors::not_found(format!(
+            "no request {id} (it may have expired); see `cemi approve`"
+        ))
+    })?;
     // A request is used once, whatever happens next.
     {
         let v = ctx.ws.open(scope)?;
@@ -852,7 +897,7 @@ pub fn approve(ctx: &mut Ctx, id: Option<&str>, deny: bool) -> Result<i32> {
         return Ok(0);
     }
     let actor = format!("{} (approved)", request.requested_by);
-    println!("{} asks to {}", request.requested_by, request.action);
+    crate::outln!("{} asks to {}", request.requested_by, request.action);
     match request.action.clone() {
         ApprovalAction::Push { reference, env } => {
             let r = Ref::parse(&reference)?;
@@ -917,7 +962,7 @@ pub fn approve(ctx: &mut Ctx, id: Option<&str>, deny: bool) -> Result<i32> {
                 keep_old: false,
             };
             for line in rotation::describe_plan(&mut ctx.ws, &fr, env_opt, &opts)? {
-                println!("{line}");
+                crate::outln!("{line}");
             }
             super::reauthenticate(ctx, fr.scope, "Approving")?;
             ctx.audit_detail(

@@ -108,7 +108,7 @@ pub fn token(ctx: &mut Ctx, cmd: TokenCmd) -> Result<i32> {
             eprintln!("    cemi mcp setup claude-code --token-name {name}");
             if print {
                 eprintln!("  The token (shown once; treat it like a password):");
-                println!("{}", secret.as_str());
+                crate::outln!("{}", secret.as_str());
             }
             Ok(0)
         }
@@ -117,10 +117,11 @@ pub fn token(ctx: &mut Ctx, cmd: TokenCmd) -> Result<i32> {
             let mut tokens: Vec<&Token> = v.tokens.values().collect();
             tokens.sort_by_key(|t| t.created);
             if tokens.is_empty() {
-                println!(
+                crate::outln!(
                     "No tokens. Create one: cemi token create claude --allow read --allow run"
                 );
             }
+            let mut list = Vec::new();
             for t in tokens {
                 let state = if t.revoked.is_some() {
                     "revoked".to_string()
@@ -129,8 +130,18 @@ pub fn token(ctx: &mut Ctx, cmd: TokenCmd) -> Result<i32> {
                 } else {
                     "active".to_string()
                 };
-                println!("{}  [{state}]  {}", t.name, describe(t));
+                crate::outln!("{}  [{state}]  {}", t.name, describe(t));
+                list.push(serde_json::json!({
+                    "name": t.name,
+                    "state": state,
+                    "entities": t.entities,
+                    "envs": t.envs,
+                    "allow": t.allow.iter().map(|p| format!("{p:?}").to_lowercase()).collect::<Vec<_>>(),
+                    "expires": t.expires.map(|e| e.to_string()),
+                    "created": t.created.to_string(),
+                }));
             }
+            ui::data(serde_json::json!({ "tokens": list }));
             Ok(0)
         }
         TokenCmd::Revoke { name } => {
@@ -230,7 +241,7 @@ pub fn mcp(mut ctx: Ctx, cmd: McpCmd) -> Result<i32> {
                         }
                         _ => {
                             ui::warn("could not run `claude mcp add`. Run it yourself:");
-                            println!(
+                            crate::outln!(
                                 "claude mcp add --scope {claude_scope} cemi -- cemi {}",
                                 args.join(" ")
                             );
@@ -243,7 +254,7 @@ pub fn mcp(mut ctx: Ctx, cmd: McpCmd) -> Result<i32> {
                         "mcpServers": { "cemi": { "command": "cemi", "args": args } }
                     });
                     eprintln!("Add this to your client's MCP configuration (it holds no secret):");
-                    println!("{}", serde_json::to_string_pretty(&snippet)?);
+                    crate::outln!("{}", serde_json::to_string_pretty(&snippet)?);
                     if scope == crate::vault::Scope::Local {
                         eprintln!(
                             "This uses the project vault: the client must start it from this project folder."
@@ -290,10 +301,15 @@ pub fn mcp(mut ctx: Ctx, cmd: McpCmd) -> Result<i32> {
         McpCmd::Ls => {
             let scope = ctx.scope()?;
             let v = ctx.ws.open(scope)?;
+            let mut list = Vec::new();
             for l in v.launchers.values() {
                 let vars: Vec<String> = l.env.iter().map(|(k, r)| format!("{k}={r}")).collect();
-                println!("{}: {}  [{}]", l.name, l.command.join(" "), vars.join(", "));
+                crate::outln!("{}: {}  [{}]", l.name, l.command.join(" "), vars.join(", "));
+                list.push(serde_json::json!({
+                    "name": l.name, "command": l.command, "env": l.env,
+                }));
             }
+            ui::data(serde_json::json!({ "servers": list }));
             Ok(0)
         }
         McpCmd::Rm { name } => {

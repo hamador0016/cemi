@@ -415,6 +415,19 @@ impl DestStatus {
         matches!(self, DestStatus::UpToDate | DestStatus::Unverifiable)
     }
 
+    /// A stable name for scripts (`--json`).
+    pub fn key(&self) -> &'static str {
+        match self {
+            DestStatus::UpToDate => "up_to_date",
+            DestStatus::Outdated => "outdated",
+            DestStatus::NeverSent => "never_sent",
+            DestStatus::ChangedOutside(_) => "changed_outside",
+            DestStatus::Missing => "missing",
+            DestStatus::Unverifiable => "unverifiable",
+            DestStatus::Error(_) => "error",
+        }
+    }
+
     /// Whether `push` sends the value without being forced. A value changed
     /// outside Cemí is not overwritten: it may be a newer key set by hand.
     pub fn needs_push(&self) -> bool {

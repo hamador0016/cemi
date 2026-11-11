@@ -12,11 +12,24 @@ fn main() {
             // `COMPLETE=<shell> cemi …` answers the shell and exits here.
             clap_complete::CompleteEnv::with_factory(cemi::cli::Cli::command).complete();
             let cli = cemi::cli::Cli::parse();
+            let json = cli.json;
+            if json {
+                cemi::ui::use_json();
+            }
             match cemi::cmd::run(cli) {
-                Ok(code) => code,
+                Ok(code) => {
+                    cemi::ui::finish_json(code, None);
+                    code
+                }
                 Err(e) => {
-                    eprintln!("error: {e:#}");
-                    1
+                    let code = cemi::errors::exit_code(&e);
+                    if json {
+                        let kind = cemi::errors::kind_of(&e).map_or("error", |k| k.name());
+                        cemi::ui::finish_json(code, Some((kind, format!("{e:#}"))));
+                    } else {
+                        eprintln!("error: {e:#}");
+                    }
+                    code
                 }
             }
         })

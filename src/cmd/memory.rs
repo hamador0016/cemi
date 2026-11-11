@@ -6,6 +6,7 @@ use std::fmt::Write as _;
 use anyhow::{Result, anyhow, bail};
 use jiff::Zoned;
 use jiff::civil::Date;
+use serde_json::{Value as Json, json};
 
 use super::Ctx;
 use crate::cli::{NoteArgs, TaskCmd};
@@ -21,6 +22,8 @@ fn today() -> Date {
 
 pub fn status(ctx: &mut Ctx) -> Result<i32> {
     let mut problems = 0;
+    let mut vaults_json: Vec<Json> = Vec::new();
+    let mut project_json: Json = Json::Null;
     let project = ctx.project()?;
     let main = ctx.scope()?;
     let mut scopes = vec![main];
@@ -38,7 +41,7 @@ pub fn status(ctx: &mut Ctx) -> Result<i32> {
         let dir = ctx.ws.dir(scope)?;
         let v = ctx.ws.open(scope)?;
         let root = v.root_id();
-        println!(
+        crate::outln!(
             "{scope} vault ({}) — {} records, environments: {}",
             dir.display(),
             v.records.values().filter(|r| !r.archived).count(),
@@ -47,12 +50,21 @@ pub fn status(ctx: &mut Ctx) -> Result<i32> {
         let mut items = crate::cmd_shared::attention(v, None);
         items.extend(crate::rotation::attention(&mut ctx.ws, scope, None));
         for a in &items {
-            println!("  ! {}: {}", a.what, a.detail);
+            crate::outln!("  ! {}: {}", a.what, a.detail);
         }
         problems += items.len();
+        let v = ctx.ws.get(scope).expect("opened");
+        vaults_json.push(json!({
+            "vault": scope.to_string(),
+            "dir": dir.display().to_string(),
+            "records": v.records.values().filter(|r| !r.archived).count(),
+            "environments": v.effective_envs(&v.root_id()),
+            "attention": items.iter().map(|a| json!({ "what": a.what, "detail": a.detail })).collect::<Vec<_>>(),
+        }));
     }
     if let Some(p) = project {
-        println!("project ({})", p.path.display());
+        let mut project_problems: Vec<Json> = Vec::new();
+        crate::outln!("project ({})", p.path.display());
         let (sel, base) = p.base()?;
         let scope = ctx.ws.scope_for(sel)?;
         let envs = {
@@ -60,7 +72,10 @@ pub fn status(ctx: &mut Ctx) -> Result<i32> {
             match v.find_entity(&base) {
                 Some(e) => v.effective_envs(&e.id.clone()),
                 None => {
-                    println!("  ! entity {} does not exist", display_path(&base));
+                    crate::outln!("  ! entity {} does not exist", display_path(&base));
+                    project_problems.push(json!({
+                        "problem": format!("entity {} does not exist", display_path(&base)),
+                    }));
                     problems += 1;
                     Vec::new()
                 }
@@ -74,7 +89,8 @@ pub fn status(ctx: &mut Ctx) -> Result<i32> {
             let r = match p.resolve_ref(spec.text()) {
                 Ok(r) => r,
                 Err(e) => {
-                    println!("  ! {var}: {e}");
+                    crate::outln!("  ! {var}: {e}");
+                    project_problems.push(json!({ "variable": var, "problem": e.to_string() }));
                     problems += 1;
                     continue;
                 }
@@ -86,25 +102,39 @@ pub fn status(ctx: &mut Ctx) -> Result<i32> {
                 }
             }
             if missing.len() == env_list.len() && !missing.is_empty() {
-                println!(
-                    "  ! {var} ({r}): {}",
-                    missing[0].split_once(": ").map(|x| x.1).unwrap_or("")
-                );
+                let why = missing[0].split_once(": ").map(|x| x.1).unwrap_or("");
+                crate::outln!("  ! {var} ({r}): {why}");
+                project_problems.push(json!({
+                    "variable": var, "reference": r.to_string(), "problem": why,
+                }));
                 problems += 1;
             } else {
                 for m in missing {
-                    println!("  ! {var} ({r}) — {m}");
+                    crate::outln!("  ! {var} ({r}) — {m}");
+                    project_problems.push(json!({
+                        "variable": var, "reference": r.to_string(), "problem": m,
+                    }));
                     problems += 1;
                 }
             }
         }
         if p.file.env.is_empty() && p.file.files.is_empty() {
-            println!("  no variables yet: `cemi var add NAME record#field`");
+            crate::outln!("  no variables yet: `cemi var add NAME record#field`");
         }
+        project_json = json!({
+            "path": p.path.display().to_string(),
+            "variables": p.file.env.len() + p.file.files.len(),
+            "problems": project_problems,
+        });
     }
     if problems == 0 {
         ui::ok("Nothing needs attention");
     }
+    ui::data(json!({
+        "needs_attention": problems,
+        "vaults": vaults_json,
+        "project": project_json,
+    }));
     Ok(0)
 }
 
@@ -180,14 +210,14 @@ pub fn note(ctx: &mut Ctx, a: NoteArgs) -> Result<i32> {
     };
     if changes.is_empty() {
         if memory.is_empty() {
-            println!("(no memory yet)");
-            println!(
+            crate::outln!("(no memory yet)");
+            crate::outln!(
                 "Add some: cemi note {} --purpose \"…\" --used-in \"…\" --rotate \"…\" --if-lost \"…\" --backup \"…\"",
                 a.path
             );
         }
         for (k, v) in &memory {
-            println!("{k}: {v}");
+            crate::outln!("{k}: {v}");
         }
         return Ok(0);
     }
@@ -225,10 +255,18 @@ pub fn task(ctx: &mut Ctx, cmd: TaskCmd) -> Result<i32> {
             let scope = ctx.scope()?;
             let v = ctx.ws.open(scope)?;
             let mut any = false;
+            let mut list: Vec<Json> = Vec::new();
             for e in v.entities.values() {
                 for t in &e.tasks {
                     any = true;
-                    println!(
+                    list.push(json!({
+                        "entity": v.entity_path_string(&e.id),
+                        "name": t.name,
+                        "every": format!("{:?}", t.every).to_lowercase(),
+                        "next": t.due().to_string(),
+                        "due": t.due() <= today(),
+                    }));
+                    crate::outln!(
                         "{}/  {}  every {:?}, next {}{}",
                         v.entity_path_string(&e.id),
                         t.name,
@@ -239,10 +277,11 @@ pub fn task(ctx: &mut Ctx, cmd: TaskCmd) -> Result<i32> {
                 }
             }
             if !any {
-                println!(
+                crate::outln!(
                     "No tasks. Add one: cemi task add <entity> \"monthly restore test\" --every month"
                 );
             }
+            ui::data(json!({ "tasks": list }));
             Ok(0)
         }
         TaskCmd::Add {
@@ -321,6 +360,7 @@ pub fn deps(ctx: &mut Ctx, reference: &str) -> Result<i32> {
     let fname = r.require_field()?.to_string();
     let (scope, rec) = ctx.record(&r)?;
     let mut found = 0;
+    let mut used_by: Vec<Json> = Vec::new();
     {
         let v = ctx.ws.get(scope).expect("opened");
         let target_entity = v.entity_path(&rec.entity);
@@ -353,7 +393,11 @@ pub fn deps(ctx: &mut Ctx, reference: &str) -> Result<i32> {
                             && p.field.as_deref() == Some(fname.as_str())
                         {
                             found += 1;
-                            println!("template {}#{}", v.record_path(other), f.name);
+                            crate::outln!("template {}#{}", v.record_path(other), f.name);
+                            used_by.push(json!({
+                                "kind": "template",
+                                "reference": format!("{}#{}", v.record_path(other), f.name),
+                            }));
                         }
                     }
                 }
@@ -369,16 +413,25 @@ pub fn deps(ctx: &mut Ctx, reference: &str) -> Result<i32> {
                 && pr.field == r.field
             {
                 found += 1;
-                println!("cemi.toml {var} ({})", p.path.display());
+                crate::outln!("cemi.toml {var} ({})", p.path.display());
+                used_by.push(json!({
+                    "kind": "project",
+                    "variable": var,
+                    "file": p.path.display().to_string(),
+                }));
             }
         }
     }
     if let Some(used) = rec.memory.get(mk::USED_IN) {
-        println!("noted as used in: {used}");
+        crate::outln!("noted as used in: {used}");
     }
     if found == 0 {
         eprintln!("Nothing in this vault or project uses {r}.");
     }
+    ui::data(json!({
+        "used_by": used_by,
+        "noted_used_in": rec.memory.get(mk::USED_IN),
+    }));
     Ok(0)
 }
 
@@ -504,7 +557,7 @@ pub fn doc(ctx: &mut Ctx, entity: Option<&str>, output: Option<std::path::PathBu
             std::fs::write(&p, md)?;
             ui::ok(format!("Wrote {}", p.display()));
         }
-        None => print!("{md}"),
+        None => crate::out!("{md}"),
     }
     Ok(0)
 }

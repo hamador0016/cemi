@@ -208,6 +208,9 @@ Unlike pattern scanners, `cemi scan` looks for *your* values, whatever their for
 
 `cemi help <command>` explains each one. References look like `[global:|local:]entity/record#field`.
 
+For scripts and CI, every command takes `--json`, and exit codes do not change between versions:
+see [docs/scripting.md](docs/scripting.md).
+
 ## How it is built
 
 - Password → Argon2id (256 MiB) → unwraps the vault key (X25519). A recovery code is created

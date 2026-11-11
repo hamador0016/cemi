@@ -23,14 +23,14 @@ pub(super) fn check_env(
     let entity = v.records[record_id].entity.clone();
     let envs = v.effective_envs(&entity);
     if !envs.iter().any(|e| e == env) {
-        bail!(
+        return Err(crate::errors::not_found(format!(
             "environment {env:?} does not exist here (available: {}). Add it with `cemi env add {env}`",
             if envs.is_empty() {
                 "none".to_string()
             } else {
                 envs.join(", ")
             }
-        );
+        )));
     }
     Ok(())
 }
@@ -378,14 +378,14 @@ pub fn history(ctx: &mut Ctx, reference: &str, env: Option<&str>) -> Result<i32>
     let (_, rec) = ctx.record(&r)?;
     let f = rec
         .field(&fname)
-        .ok_or_else(|| anyhow!("no field {fname:?}"))?;
+        .ok_or_else(|| crate::errors::not_found(format!("no field {fname:?}")))?;
     let Some((key, slot)) = f.slot_for(env) else {
-        bail!(
+        return Err(crate::errors::not_found(format!(
             "{r} has no value{}",
             env.map(|e| format!(" for {e}")).unwrap_or_default()
-        );
+        )));
     };
-    println!(
+    crate::outln!(
         "{r} ({})",
         if key == SHARED {
             "all environments"
@@ -394,10 +394,10 @@ pub fn history(ctx: &mut Ctx, reference: &str, env: Option<&str>) -> Result<i32>
         }
     );
     if let Some(ext) = &slot.external {
-        println!("  not stored here: {ext}");
+        crate::outln!("  not stored here: {ext}");
     }
     for (i, ver) in slot.versions.iter().enumerate() {
-        println!(
+        crate::outln!(
             "  v{}  {:<9} {}  by {}{}",
             i + 1,
             ver.state.to_string(),
@@ -409,6 +409,18 @@ pub fn history(ctx: &mut Ctx, reference: &str, env: Option<&str>) -> Result<i32>
                 .unwrap_or_default()
         );
     }
+    ui::data(serde_json::json!({
+        "reference": r.to_string(),
+        "env": if key == SHARED { "all" } else { key },
+        "external": slot.external,
+        "versions": slot.versions.iter().enumerate().map(|(i, v)| serde_json::json!({
+            "version": i + 1,
+            "state": v.state.to_string(),
+            "at": v.at.to_string(),
+            "by": v.actor,
+            "note": v.note,
+        })).collect::<Vec<_>>(),
+    }));
     Ok(0)
 }
 

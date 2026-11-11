@@ -9,7 +9,7 @@ mod structure;
 mod values;
 mod vault_cmds;
 
-use anyhow::{Result, anyhow, bail};
+use anyhow::Result;
 
 use crate::audit::{self, Event};
 use crate::cli::{Cli, Cmd};
@@ -122,7 +122,7 @@ impl Ctx {
 
     pub fn require_project(&self) -> Result<Project> {
         self.project()?.ok_or_else(|| {
-            anyhow!("no cemi.toml in this folder or its parents. Create one with `cemi init` or `cemi link`")
+            crate::errors::not_found("no cemi.toml in this folder or its parents. Create one with `cemi init` or `cemi link`")
         })
     }
 }
@@ -139,7 +139,7 @@ pub(crate) fn reauthenticate(ctx: &Ctx, scope: Scope, why: &str) -> Result<()> {
     };
     let pw = ui::password(&format!("{why}: password for the {label} vault: "))?;
     if header.unlock_with_password(&pw)?.is_none() {
-        bail!("wrong password");
+        return Err(crate::errors::locked("wrong password"));
     }
     Ok(())
 }
@@ -165,7 +165,7 @@ fn print_completion_setup(shell: crate::cli::Shell) {
         ),
     };
     eprintln!("Add this line to {file}, then open a new terminal:");
-    println!("{line}");
+    crate::outln!("{line}");
 }
 
 /// Commands that change a vault take its lock for writing.
@@ -219,6 +219,22 @@ fn writes(cmd: &Cmd) -> bool {
 pub fn run(cli: Cli) -> Result<i32> {
     if cli.password_stdin {
         ui::use_password_stdin();
+    }
+    if cli.json {
+        use crate::cli::McpCmd;
+        let name = match &cli.command {
+            Cmd::Run { .. } => Some("run"),
+            Cmd::Mcp(McpCmd::Serve { .. }) => Some("mcp serve"),
+            Cmd::Mcp(McpCmd::Launch { .. }) => Some("mcp launch"),
+            Cmd::Completion { .. } => Some("completion"),
+            Cmd::ClipboardHelper { .. } => Some("__clipboard"),
+            _ => None,
+        };
+        if let Some(name) = name {
+            anyhow::bail!(
+                "--json does not apply to `cemi {name}`: its output belongs to another program"
+            );
+        }
     }
     if let crate::cli::Cmd::Completion { shell } = cli.command {
         print_completion_setup(shell);

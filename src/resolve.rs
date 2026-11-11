@@ -48,7 +48,9 @@ fn resolve_depth(ws: &mut Workspace, r: &Ref, env: Option<&str>, depth: usize) -
     let entity_path = vault.entity_path(&record.entity);
     let field = record
         .field(&field_name)
-        .ok_or_else(|| anyhow!("{} has no field {field_name:?}", r.record_path()))?
+        .ok_or_else(|| {
+            crate::errors::not_found(format!("{} has no field {field_name:?}", r.record_path()))
+        })?
         .clone();
     let env_label = env.unwrap_or("(shared)");
     let Some((_, slot)) = field.slot_for(env) else {

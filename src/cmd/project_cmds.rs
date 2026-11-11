@@ -63,12 +63,20 @@ pub fn var(ctx: &mut Ctx, cmd: VarCmd) -> Result<i32> {
     let project = ctx.require_project()?;
     match cmd {
         VarCmd::Ls => {
+            let mut list = Vec::new();
             for (k, v) in &project.file.env {
-                println!("{k} = {}", v.text());
+                crate::outln!("{k} = {}", v.text());
+                list.push(serde_json::json!({
+                    "name": k, "reference": v.text(), "purpose": v.purpose(), "file": false,
+                }));
             }
             for (k, v) in &project.file.files {
-                println!("{k} = {}  (file)", v.text());
+                crate::outln!("{k} = {}  (file)", v.text());
+                list.push(serde_json::json!({
+                    "name": k, "reference": v.text(), "purpose": v.purpose(), "file": true,
+                }));
             }
+            ui::data(serde_json::json!({ "variables": list }));
             Ok(0)
         }
         VarCmd::Add {
@@ -172,7 +180,7 @@ pub fn export(ctx: &mut Ctx, output: Option<std::path::PathBuf>) -> Result<i32> 
             std::fs::write(&p, out)?;
             ui::ok(format!("Wrote {}", p.display()));
         }
-        None => print!("{out}"),
+        None => crate::out!("{out}"),
     }
     Ok(0)
 }
@@ -213,7 +221,9 @@ pub fn import(
     if let Some(e) = env
         && !v.effective_envs(&entity).iter().any(|x| x == e)
     {
-        bail!("environment {e:?} does not exist there; add it with `cemi env add {e}`");
+        return Err(crate::errors::not_found(format!(
+            "environment {e:?} does not exist there; add it with `cemi env add {e}`"
+        )));
     }
     let source = file.display().to_string();
     let n = store_vars(v, &entity, env, &pairs, &plain, &source)?;
@@ -443,7 +453,7 @@ pub fn discover(ctx: &mut Ctx, o: DiscoverOptions) -> Result<i32> {
     let root = without_verbatim_prefix(root);
     let projects = discover::find(&root, o.depth)?;
     if projects.is_empty() {
-        println!(
+        crate::outln!(
             "No .env files under {} (looked {} folders deep; change it with --depth)",
             root.display(),
             o.depth
@@ -469,7 +479,7 @@ pub fn discover(ctx: &mut Ctx, o: DiscoverOptions) -> Result<i32> {
 
     // What was found.
     let files: usize = projects.iter().map(|p| p.files.len()).sum();
-    println!(
+    crate::outln!(
         "Found {files} .env file{} in {} folder{} under {}",
         plural(files),
         projects.len(),
@@ -478,13 +488,13 @@ pub fn discover(ctx: &mut Ctx, o: DiscoverOptions) -> Result<i32> {
     );
     let shown_dir = |p: &FoundProject| relative(&root, &p.dir);
     for p in &projects {
-        println!();
-        println!("  {}  →  {scope}:{}", shown_dir(p), target(p).join("/"));
+        crate::outln!();
+        crate::outln!("  {}  →  {scope}:{}", shown_dir(p), target(p).join("/"));
         for f in &p.files {
             let env = env_shown(o.env.unwrap_or(&f.env));
             match &f.error {
-                Some(e) => println!("    {:<26} cannot be read: {e}", f.name()),
-                None => println!(
+                Some(e) => crate::outln!("    {:<26} cannot be read: {e}", f.name()),
+                None => crate::outln!(
                     "    {:<26} {:<10} {} variable{}",
                     f.name(),
                     env,
@@ -534,11 +544,35 @@ pub fn discover(ctx: &mut Ctx, o: DiscoverOptions) -> Result<i32> {
         ));
     }
     if !warnings.is_empty() {
-        println!();
+        crate::outln!();
         for w in &warnings {
-            println!("! {w}");
+            crate::outln!("! {w}");
         }
     }
+    let mut report = serde_json::json!({
+        "root": root.display().to_string(),
+        "vault": scope.to_string(),
+        "projects": projects.iter().map(|p| serde_json::json!({
+            "dir": p.dir.display().to_string(),
+            "entity": target(p).join("/"),
+            "files": p.files.iter().map(|f| serde_json::json!({
+                "name": f.name(),
+                "env": env_shown(o.env.unwrap_or(&f.env)),
+                "variables": f.vars.len(),
+                "git": match f.git {
+                    GitState::NoRepo => "no_repo",
+                    GitState::Tracked => "committed",
+                    GitState::Ignored => "ignored",
+                    GitState::Unprotected => "not_ignored",
+                },
+                "modified": f.modified.map(|m| m.to_string()),
+                "error": f.error,
+            })).collect::<Vec<_>>(),
+        })).collect::<Vec<_>>(),
+        "warnings": warnings,
+        "imported": false,
+    });
+    ui::data(report.clone());
 
     let readable: Vec<&FoundProject> = projects
         .iter()
@@ -551,13 +585,13 @@ pub fn discover(ctx: &mut Ctx, o: DiscoverOptions) -> Result<i32> {
     if readable.is_empty() {
         return Ok(0);
     }
-    println!();
+    crate::outln!();
     let vault_exists = match scope {
         Scope::Global => ctx.ws.global_exists(),
         Scope::Local => ctx.ws.dir(scope).is_ok(),
     };
     if !vault_exists {
-        println!(
+        crate::outln!(
             "To import them, create the {scope} vault first ({}), then run this again.",
             match scope {
                 Scope::Global => "`cemi init --global`",
@@ -575,7 +609,7 @@ pub fn discover(ctx: &mut Ctx, o: DiscoverOptions) -> Result<i32> {
         }
     );
     if !o.yes && !ui::confirm(&question) {
-        println!("Nothing imported. Run it again with --yes to import.");
+        crate::outln!("Nothing imported. Run it again with --yes to import.");
         return Ok(0);
     }
 
@@ -593,11 +627,14 @@ pub fn discover(ctx: &mut Ctx, o: DiscoverOptions) -> Result<i32> {
         }
     }
     if failed == 0 {
-        println!();
-        println!(
+        crate::outln!();
+        crate::outln!(
             "Next: in each folder, `cemi run -e dev -- <your command>`. Once it works, delete the .env files."
         );
     }
+    report["imported"] = serde_json::json!(true);
+    report["failed"] = serde_json::json!(failed);
+    ui::data(report);
     Ok(if failed > 0 { 1 } else { 0 })
 }
 
@@ -823,10 +860,17 @@ pub fn preset(ctx: &mut Ctx, cmd: crate::cli::PresetCmd) -> Result<i32> {
     use crate::cli::PresetCmd;
     match cmd {
         PresetCmd::Ls => {
+            let mut list = Vec::new();
             for name in crate::presets::names() {
                 let p = crate::presets::get(name)?;
-                println!("{name:<16} {}", p.description);
+                crate::outln!("{name:<16} {}", p.description);
+                list.push(serde_json::json!({
+                    "name": name,
+                    "description": p.description,
+                    "variables": p.env.keys().collect::<Vec<_>>(),
+                }));
             }
+            ui::data(serde_json::json!({ "presets": list }));
             Ok(0)
         }
         PresetCmd::Add { names, into } => {
@@ -847,7 +891,7 @@ pub fn types(
     let project = ctx.require_project()?;
     let text = crate::types_gen::generate(&project.file, format);
     let Some(path) = output else {
-        print!("{text}");
+        crate::out!("{text}");
         return Ok(0);
     };
     // Line endings may differ after a checkout on Windows.

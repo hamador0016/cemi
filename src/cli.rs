@@ -25,6 +25,10 @@ pub struct Cli {
     #[arg(long, global = true)]
     pub password_stdin: bool,
 
+    /// Print one JSON object on standard output: {ok, exit_code, data, text, error}
+    #[arg(long, global = true)]
+    pub json: bool,
+
     #[command(subcommand)]
     pub command: Cmd,
 }
