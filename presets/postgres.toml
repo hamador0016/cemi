@@ -1,0 +1,18 @@
+description = "Postgres: password, and DATABASE_URL built from it"
+
+[records.db]
+memory.purpose = "The app's Postgres database"
+memory.rotate = "In psql: ALTER ROLE app WITH PASSWORD '<new>'; then `cemi set db#password -e <env>` (DATABASE_URL follows) and restart the app"
+memory.if_leaked = "Change the password now (see rotate) and look for connections you do not know: SELECT * FROM pg_stat_activity"
+
+[[records.db.fields]]
+name = "password"
+secret = true
+
+[[records.db.fields]]
+name = "url"
+type = "template"
+value = "postgres://app:{{db#password}}@localhost:5432/app"
+
+[env]
+DATABASE_URL = "db#url"

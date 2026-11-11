@@ -233,8 +233,11 @@ pub fn import(
     ));
 
     if let Some(p) = project {
-        let keys: Vec<String> = pairs.iter().map(|(k, _)| k.clone()).collect();
-        let linked = link_vars(ctx, &p.path, scope, &path, &keys)?;
+        let entries: Vec<(String, String)> = pairs
+            .iter()
+            .map(|(k, _)| (k.clone(), format!("{k}#value")))
+            .collect();
+        let linked = link_vars(ctx, &p.path, scope, &path, &entries)?;
         ui::ok(format!(
             "Added {} variables to {}",
             linked.added.len(),
@@ -340,21 +343,22 @@ fn store_vars(
     Ok(n)
 }
 
-struct Linked {
-    added: Vec<String>,
+pub(super) struct Linked {
+    pub added: Vec<String>,
     /// Variables the file already had; they are not changed.
-    kept: Vec<String>,
+    pub kept: Vec<String>,
 }
 
-/// Adds `keys` (records of `path` in `scope`, field "value") to the [env]
-/// table of a project file, creating the file if needed. References are
-/// relative when the file's base is that entity, absolute otherwise.
-fn link_vars(
+/// Adds variables to the [env] table of a project file, creating the file if
+/// needed. Each entry is (variable, reference relative to the entity `path`
+/// of `scope`); in the file it is written relative when the file's base is
+/// that entity, absolute otherwise. Variables already in the file are kept.
+pub(super) fn link_vars(
     ctx: &Ctx,
     file: &Path,
     scope: Scope,
     path: &[String],
-    keys: &[String],
+    entries: &[(String, String)],
 ) -> Result<Linked> {
     if !file.exists() {
         let entity = (!path.is_empty()).then(|| path.join("/"));
@@ -386,25 +390,33 @@ fn link_vars(
         if doc.get("env").is_none() {
             doc["env"] = toml_edit::table();
         }
-        for key in keys {
-            let exists = ["env", "files"].iter().any(|t| {
-                doc.get(t)
-                    .and_then(|t| t.as_table_like())
-                    .is_some_and(|t| t.contains_key(key))
-            });
-            if exists {
-                linked.kept.push(key.clone());
-                continue;
-            }
+        for (key, target) in entries {
             let reference = if base_scope == scope && path.starts_with(&base) {
                 let mut rel: Vec<String> = path[base.len()..].to_vec();
-                rel.push(key.clone());
-                format!("{}#value", rel.join("/"))
+                rel.push(target.clone());
+                rel.join("/")
             } else {
                 let mut abs = path.to_vec();
-                abs.push(key.clone());
-                format!("{scope}:{}#value", abs.join("/"))
+                abs.push(target.clone());
+                format!("{scope}:{}", abs.join("/"))
             };
+            let existing = ["env", "files"].iter().find_map(|t| {
+                let item = doc.get(t)?.as_table_like()?.get(key)?;
+                // Short form ("db#url") or full form ({ ref = "db#url", … }).
+                let text = item
+                    .as_str()
+                    .or_else(|| item.as_table_like()?.get("ref")?.as_str())
+                    .unwrap_or_default();
+                Some(text.to_string())
+            });
+            match existing {
+                Some(text) if text == reference => continue,
+                Some(_) => {
+                    linked.kept.push(key.clone());
+                    continue;
+                }
+                None => {}
+            }
             doc["env"][key.as_str()] = toml_edit::value(reference);
             linked.added.push(key.clone());
         }
@@ -675,7 +687,11 @@ fn import_project(
         keys.sort();
         keys.dedup();
         let file = p.dir.join(project::FILE);
-        let linked = link_vars(ctx, &file, scope, path, &keys)?;
+        let entries: Vec<(String, String)> = keys
+            .iter()
+            .map(|k| (k.clone(), format!("{k}#value")))
+            .collect();
+        let linked = link_vars(ctx, &file, scope, path, &entries)?;
         let file_shown = Path::new(shown).join(project::FILE);
         if !linked.added.is_empty() {
             ui::ok(format!(
@@ -711,4 +727,113 @@ fn relative(root: &Path, dir: &Path) -> String {
 
 fn plural(n: usize) -> &'static str {
     if n == 1 { "" } else { "s" }
+}
+
+/// Applies presets to the entity `path` of `scope`, and adds their variables
+/// to this project's cemi.toml when there is one.
+pub fn apply_presets(ctx: &mut Ctx, scope: Scope, path: &[String], names: &[String]) -> Result<()> {
+    let presets = names
+        .iter()
+        .map(|n| crate::presets::get(n))
+        .collect::<Result<Vec<_>>>()?;
+    let project = ctx.project()?;
+    let v = ctx.ws.open(scope)?;
+    let entity = v.ensure_entity(path)?;
+    let mut total = crate::presets::Applied::default();
+    for p in &presets {
+        let n = crate::presets::apply(v, &entity, p)?;
+        total.records += n.records;
+        total.fields += n.fields;
+        total.notes += n.notes;
+    }
+    v.save()?;
+    ctx.audit_detail(
+        scope,
+        "preset",
+        Some(display_path(path)),
+        None,
+        Some(names.join(", ")),
+    );
+    let place = if path.is_empty() {
+        format!("the {scope} vault")
+    } else {
+        format!("{scope}:{}", path.join("/"))
+    };
+    ui::ok(format!(
+        "Preset {} in {place}: {} record{}, {} field{}, {} note{} added",
+        names.join(" + "),
+        total.records,
+        plural(total.records),
+        total.fields,
+        plural(total.fields),
+        total.notes,
+        plural(total.notes)
+    ));
+    if let Some(proj) = project {
+        let shown = proj
+            .path
+            .strip_prefix(&ctx.ws.cwd)
+            .unwrap_or(&proj.path)
+            .display()
+            .to_string();
+        let entries: Vec<(String, String)> = presets
+            .iter()
+            .flat_map(|p| p.env.iter().map(|(k, r)| (k.clone(), r.clone())))
+            .collect();
+        let linked = link_vars(ctx, &proj.path, scope, path, &entries)?;
+        if !linked.added.is_empty() {
+            ui::ok(format!("Added {} to {shown}", linked.added.join(", ")));
+        }
+        if !linked.kept.is_empty() {
+            ui::warn(format!(
+                "{shown} already had {} pointing elsewhere; left as it was",
+                linked.kept.join(", ")
+            ));
+        }
+    }
+    let prefix = if path.is_empty() {
+        String::new()
+    } else {
+        format!("{}/", path.join("/"))
+    };
+    // Fields that still have no value at all.
+    let v = ctx.ws.open(scope)?;
+    let mut fill: Vec<String> = presets
+        .iter()
+        .flat_map(|p| p.to_fill())
+        .filter(|reference| {
+            let (rec, field) = reference.split_once('#').expect("record#field");
+            v.find_record_in(&entity, rec)
+                .and_then(|r| r.field(field))
+                .is_none_or(|f| f.values.values().all(|s| s.current().is_none()))
+        })
+        .collect();
+    fill.sort();
+    fill.dedup();
+    if !fill.is_empty() {
+        eprintln!("Next, store the values (each command asks for it, hidden):");
+        for f in fill {
+            eprintln!("  cemi set {prefix}{f} -e dev");
+        }
+    }
+    Ok(())
+}
+
+pub fn preset(ctx: &mut Ctx, cmd: crate::cli::PresetCmd) -> Result<i32> {
+    use crate::cli::PresetCmd;
+    match cmd {
+        PresetCmd::Ls => {
+            for name in crate::presets::names() {
+                let p = crate::presets::get(name)?;
+                println!("{name:<16} {}", p.description);
+            }
+            Ok(0)
+        }
+        PresetCmd::Add { names, into } => {
+            let (sel, path) = ctx.entity_path(into.as_deref())?;
+            let scope = ctx.ws.scope_for(sel)?;
+            apply_presets(ctx, scope, &path, &names)?;
+            Ok(0)
+        }
+    }
 }

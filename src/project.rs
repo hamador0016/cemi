@@ -178,7 +178,15 @@ pub fn template(vault: Option<&str>, entity: Option<&str>) -> String {
     if let Some(e) = entity {
         s.push_str(&format!("entity = {}\n", toml_edit::Value::from(e)));
     }
-    s.push_str("\n[env]\n# DATABASE_URL = \"db#url\"\n\n[files]\n\n[ai.commands]\n# test = { cmd = [\"npm\", \"test\"], envs = [\"dev\"] }\n");
+    s.push_str(concat!(
+        "\n# Variables for `cemi run`: NAME = \"record#field\" (or `cemi var add NAME record#field`)\n",
+        "[env]\n",
+        "\n# Variables that get a file path instead of the value\n",
+        "[files]\n",
+        "\n# Commands an AI client may run, and in which environments:\n",
+        "# test = { cmd = [\"npm\", \"test\"], envs = [\"dev\"] }\n",
+        "[ai.commands]\n",
+    ));
     s
 }
 

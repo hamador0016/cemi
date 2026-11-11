@@ -76,6 +76,17 @@ cemi status
 La bóveda del proyecto se abre con tu contraseña global. Las llaves compartidas pueden vivir en
 la global y usarse desde cualquier proyecto: `cemi var add CF_TOKEN global:cuentas/cloudflare#token`.
 
+Para un stack común, empieza con un preset en vez de una bóveda vacía:
+
+```bash
+cemi init --preset next-supabase --preset stripe
+```
+
+Crea los registros con sus campos, notas sobre cómo rotar cada llave y qué hacer si se filtra,
+y las variables en `cemi.toml`; después lista los `cemi set` para los valores. `cemi preset ls`
+los muestra todos (Supabase, Next.js + Supabase, Stripe, Resend, Postgres); `cemi preset add`
+agrega uno a un proyecto que ya existe.
+
 ## ¿Ya tienes archivos .env?
 
 ```bash
@@ -178,7 +189,7 @@ cemi scan --history      # busca tus valores en todo el historial de git
 | Memoria | `note`, `task`, `deps`, `doc` |
 | Ambientes | `env ls/add/rm/diff/protect/unprotect` |
 | Rotación | `origin set/rm`, `dest add/ls/rm`, `verify`, `push`, `check`, `rotate`, `revoke`, `incident`, `approve` |
-| Proyecto | `link`, `var add/rm/ls`, `run`, `export`, `import` (`--discover` para todos tus proyectos) |
+| Proyecto | `preset ls/add`, `link`, `var add/rm/ls`, `run`, `export`, `import` (`--discover` para todos tus proyectos) |
 | IA | `token create/ls/revoke`, `mcp serve/setup/add/launch/ls/rm` |
 | Git | `scan`, `hook install` |
 

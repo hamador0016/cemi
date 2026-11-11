@@ -1,0 +1,23 @@
+description = "Stripe: publishable key, server key and webhook signing secret"
+
+[records.stripe]
+memory.purpose = "Stripe payments: the publishable key (pk_…) is safe in the browser; the server key and the webhook secret are not"
+memory.rotate = "dashboard.stripe.com/apikeys → ⋯ → Rotate key. The old key can stay valid for up to 7 days while you switch: `cemi set stripe#secret-key -e <env>`, then `cemi push`. Prefer a restricted key (rk_…) with only the permissions the app needs"
+memory.if_leaked = "Rotate it at dashboard.stripe.com/apikeys with expiration Now, then `cemi set stripe#secret-key -e <env>` and `cemi push`. Check the key's request logs (⋯ → View request logs) for calls you did not make"
+memory.links = "https://dashboard.stripe.com/apikeys https://dashboard.stripe.com/webhooks"
+
+[[records.stripe.fields]]
+name = "publishable-key"
+
+[[records.stripe.fields]]
+name = "secret-key"
+secret = true
+
+[[records.stripe.fields]]
+name = "webhook-secret"
+secret = true
+
+[env]
+STRIPE_PUBLISHABLE_KEY = "stripe#publishable-key"
+STRIPE_SECRET_KEY = "stripe#secret-key"
+STRIPE_WEBHOOK_SECRET = "stripe#webhook-secret"

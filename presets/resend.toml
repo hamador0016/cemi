@@ -1,0 +1,14 @@
+description = "Resend: API key for sending email"
+
+[records.resend]
+memory.purpose = "Resend: sends the app's email"
+memory.rotate = "resend.com/api-keys: create a new key (restricted to the sending domain if you can), `cemi set resend#api-key -e <env>` and `cemi push`, then remove the old key (More options → Remove API key)"
+memory.if_leaked = "Remove the key at resend.com/api-keys now, then create a new one and `cemi set resend#api-key -e <env>`"
+memory.links = "https://resend.com/api-keys"
+
+[[records.resend.fields]]
+name = "api-key"
+secret = true
+
+[env]
+RESEND_API_KEY = "resend#api-key"

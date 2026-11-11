@@ -36,6 +36,9 @@ pub enum Cmd {
         /// Environments to start with, comma separated
         #[arg(long, default_value = "dev,prod")]
         envs: String,
+        /// Start with the usual records of a stack (repeat for several; see `cemi preset ls`)
+        #[arg(long, value_name = "NAME", conflicts_with = "global")]
+        preset: Vec<String>,
         /// Give a local vault its own password instead of linking it to the global vault
         #[arg(long)]
         own_password: bool,
@@ -187,6 +190,10 @@ pub enum Cmd {
     /// Environments: list, add, remove, compare
     #[command(subcommand)]
     Env(EnvCmd),
+
+    /// Ready-made records for common stacks: Next.js + Supabase, Stripe, Resend, Postgres
+    #[command(subcommand)]
+    Preset(PresetCmd),
 
     /// Point this project at an entity of a vault (creates or updates cemi.toml)
     Link { entity: Option<String> },
@@ -679,6 +686,20 @@ pub enum DestKind {
         set: Vec<String>,
         #[arg(long = "secret", value_name = "KEY=REF")]
         secret: Vec<String>,
+    },
+}
+
+#[derive(Subcommand)]
+pub enum PresetCmd {
+    /// The presets that come with Cemí
+    Ls,
+    /// Add a preset's records, notes and variables: cemi preset add stripe
+    Add {
+        #[arg(required = true, value_name = "NAME")]
+        names: Vec<String>,
+        /// Entity to put the records in (default: the vault's top)
+        #[arg(long, add = ArgValueCompleter::new(crate::complete::entities))]
+        into: Option<String>,
     },
 }
 

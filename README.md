@@ -76,6 +76,17 @@ cemi status
 The local vault opens with your global password. Shared keys can live in the global vault and
 be referenced from any project: `cemi var add CF_TOKEN global:accounts/cloudflare#token`.
 
+For a common stack, start from a preset instead of a blank vault:
+
+```bash
+cemi init --preset next-supabase --preset stripe
+```
+
+It creates the records with their fields, notes on how to rotate each key and what to do if
+it leaks, and the variables in `cemi.toml`; then it lists the `cemi set` commands for the
+values. `cemi preset ls` shows them all (Supabase, Next.js + Supabase, Stripe, Resend,
+Postgres); `cemi preset add` adds one to a project that already exists.
+
 ## Already have .env files?
 
 ```bash
@@ -181,7 +192,7 @@ Unlike pattern scanners, `cemi scan` looks for *your* values, whatever their for
 | Memory | `note`, `task`, `deps`, `doc` |
 | Environments | `env ls/add/rm/diff/protect/unprotect` |
 | Rotation | `origin set/rm`, `dest add/ls/rm`, `verify`, `push`, `check`, `rotate`, `revoke`, `incident`, `approve` |
-| Project | `link`, `var add/rm/ls`, `run`, `export`, `import` (`--discover` for every project) |
+| Project | `preset ls/add`, `link`, `var add/rm/ls`, `run`, `export`, `import` (`--discover` for every project) |
 | AI | `token create/ls/revoke`, `mcp serve/setup/add/launch/ls/rm` |
 | Git | `scan`, `hook install` |
 

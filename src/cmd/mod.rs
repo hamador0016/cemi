@@ -192,6 +192,7 @@ fn writes(cmd: &Cmd) -> bool {
         Cmd::Dest(DestCmd::Ls { .. }) | Cmd::Check { .. } => false,
         Cmd::Incident { rotate, .. } => *rotate,
         Cmd::Task(TaskCmd::Ls) => false,
+        Cmd::Preset(PresetCmd::Ls) => false,
         Cmd::Token(TokenCmd::Ls) => false,
         Cmd::Mcp(
             McpCmd::Ls | McpCmd::Launch { .. } | McpCmd::Setup { .. } | McpCmd::Serve { .. },
@@ -227,7 +228,12 @@ pub fn run(cli: Cli) -> Result<i32> {
     let mut ctx = Ctx::new(global, write)?;
     use crate::cli::Cmd as C;
     match cli.command {
-        C::Init { envs, own_password } => vault_cmds::init(&mut ctx, &envs, own_password),
+        C::Init {
+            envs,
+            own_password,
+            preset,
+        } => vault_cmds::init(&mut ctx, &envs, own_password, &preset),
+        C::Preset(c) => project_cmds::preset(&mut ctx, c),
         C::Unlock => vault_cmds::unlock(&mut ctx),
         C::Lock => vault_cmds::lock(&mut ctx),
         C::Status => memory::status(&mut ctx),

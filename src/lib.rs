@@ -11,6 +11,7 @@ pub mod discover;
 pub mod dotenv;
 pub mod mcp;
 pub mod model;
+pub mod presets;
 pub mod project;
 pub mod refs;
 pub mod resolve;

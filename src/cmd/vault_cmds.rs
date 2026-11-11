@@ -24,7 +24,11 @@ fn show_recovery_code(code: &str) {
     eprintln!();
 }
 
-pub fn init(ctx: &mut Ctx, envs: &str, own_password: bool) -> Result<i32> {
+pub fn init(ctx: &mut Ctx, envs: &str, own_password: bool, presets: &[String]) -> Result<i32> {
+    // Check preset names before creating anything.
+    for p in presets {
+        crate::presets::get(p)?;
+    }
     let envs: Vec<&str> = envs
         .split(',')
         .map(str::trim)
@@ -105,9 +109,17 @@ pub fn init(ctx: &mut Ctx, envs: &str, own_password: bool) -> Result<i32> {
     if let Some(code) = &created.recovery_code {
         show_recovery_code(code);
     }
-    eprintln!(
-        "Next: `cemi add stripe`, `cemi field add stripe secret --secret`, `cemi set stripe#secret -e dev`."
-    );
+    drop(created);
+    if presets.is_empty() {
+        eprintln!(
+            "Next: `cemi add stripe`, `cemi field add stripe secret --secret`, `cemi set stripe#secret -e dev`. Or start from a preset: `cemi preset ls`."
+        );
+    } else {
+        // A fresh workspace sees the vault just created.
+        let cwd = ctx.ws.cwd.clone();
+        ctx.ws = crate::workspace::Workspace::at(&cwd, true)?;
+        super::project_cmds::apply_presets(ctx, Scope::Local, &[], presets)?;
+    }
     Ok(0)
 }
 

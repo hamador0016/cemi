@@ -1,0 +1,23 @@
+description = "Next.js with Supabase: project URL, publishable key and secret key"
+
+[records.supabase]
+memory.purpose = "Supabase project: the URL and publishable key are safe in the browser; the secret key is for the server only"
+memory.rotate = "Settings → API Keys: create a new secret key, switch to it, then delete the old one. Cemí can do all of it: `cemi origin set supabase#secret-key -e <env> supabase-key --project <ref> --token <access token ref>`, then `cemi rotate supabase#secret-key -e <env>`"
+memory.if_leaked = "A secret key (sb_secret_…) bypasses Row Level Security. Delete it in Settings → API Keys now, then `cemi rotate supabase#secret-key -e <env> --leaked`"
+memory.links = "https://supabase.com/dashboard/project/_/settings/api-keys"
+
+[[records.supabase.fields]]
+name = "url"
+type = "url"
+
+[[records.supabase.fields]]
+name = "publishable-key"
+
+[[records.supabase.fields]]
+name = "secret-key"
+secret = true
+
+[env]
+NEXT_PUBLIC_SUPABASE_URL = "supabase#url"
+NEXT_PUBLIC_SUPABASE_PUBLISHABLE_KEY = "supabase#publishable-key"
+SUPABASE_SECRET_KEY = "supabase#secret-key"
