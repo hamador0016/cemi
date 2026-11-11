@@ -45,8 +45,8 @@ With `--json`, standard output is exactly one JSON object:
 - Secret values never appear: `show` says whether each secret is set, when, and how many
   versions it has.
 
-`--json` does not apply to `run`, `mcp serve`, `mcp launch` and `completion`: their output
-belongs to another program.
+`--json` does not apply to `run`, `ci load`, `mcp serve`, `mcp launch` and `completion`,
+whose output belongs to another program, nor to `reveal`, which prints the value alone.
 
 ### Examples
 

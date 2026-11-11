@@ -41,6 +41,22 @@ pub struct ProjectFile {
     pub files: BTreeMap<String, RefSpec>,
     #[serde(default)]
     pub ai: Ai,
+    /// Secrets for CI (`cemi ci`).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub ci: Option<CiConfig>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct CiConfig {
+    /// Public half of the CI key: `cemi ci export` encrypts to it.
+    pub recipient: String,
+    /// The encrypted file, relative to cemi.toml (default cemi.ci.age).
+    #[serde(default)]
+    pub file: Option<String>,
+    /// Only these variables go to CI (default: all of them).
+    #[serde(default)]
+    pub vars: Option<Vec<String>>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]

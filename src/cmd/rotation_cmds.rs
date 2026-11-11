@@ -247,36 +247,8 @@ pub fn dest(ctx: &mut Ctx, cmd: DestCmd) -> Result<i32> {
                 ));
             }
             let env_key = env.clone().unwrap_or_else(|| SHARED.into());
-            let field = fr.field_mut(&mut ctx.ws)?;
-            if field
-                .destinations
-                .iter()
-                .any(|d| d.spec == spec && d.env == env_key)
-            {
-                bail!("{r} already goes to {}", spec.describe());
-            }
-            let id = loop {
-                let id = crypto::new_id()[..6].to_string();
-                if !field.destinations.iter().any(|d| d.id == id) {
-                    break id;
-                }
-            };
             let describe = spec.describe();
-            field.destinations.push(Destination {
-                id: id.clone(),
-                env: env_key.clone(),
-                spec,
-                last: None,
-                created: Timestamp::now(),
-            });
-            ctx.ws.open(fr.scope)?.save()?;
-            ctx.audit_detail(
-                fr.scope,
-                "dest.add",
-                Some(r.to_string()),
-                env.as_deref(),
-                Some(describe.clone()),
-            );
+            let id = add_destination(ctx, &fr, &r.to_string(), &env_key, spec)?;
             ui::ok(format!(
                 "{r} ({}) → {describe}  [id {id}]. Send it now with `cemi push {r}`",
                 env_label(&env_key)
@@ -1021,4 +993,46 @@ fn show_step(step: Step, text: &str) {
         Step::Done => ui::ok(text),
         Step::Attention => ui::warn(text),
     }
+}
+
+/// Adds a destination to a field (env_key is an environment or SHARED),
+/// saves, and returns its id.
+pub(super) fn add_destination(
+    ctx: &mut Ctx,
+    fr: &FieldRef,
+    shown: &str,
+    env_key: &str,
+    spec: DestSpec,
+) -> Result<String> {
+    let field = fr.field_mut(&mut ctx.ws)?;
+    if field
+        .destinations
+        .iter()
+        .any(|d| d.spec == spec && d.env == env_key)
+    {
+        bail!("{shown} already goes to {}", spec.describe());
+    }
+    let id = loop {
+        let id = crypto::new_id()[..6].to_string();
+        if !field.destinations.iter().any(|d| d.id == id) {
+            break id;
+        }
+    };
+    let describe = spec.describe();
+    field.destinations.push(Destination {
+        id: id.clone(),
+        env: env_key.to_string(),
+        spec,
+        last: None,
+        created: Timestamp::now(),
+    });
+    ctx.ws.open(fr.scope)?.save()?;
+    ctx.audit_detail(
+        fr.scope,
+        "dest.add",
+        Some(shown.to_string()),
+        (env_key != SHARED).then_some(env_key),
+        Some(describe),
+    );
+    Ok(id)
 }

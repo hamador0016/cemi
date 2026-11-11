@@ -194,6 +194,29 @@ cualquier comando; cualquiera puede agregar un proveedor con un programa pequeñ
 `prod` está protegido: los cambios ahí piden tu contraseña, y si una IA los pide por MCP solo
 crea una solicitud que tú apruebas con `cemi approve`.
 
+## Secretos en CI
+
+El CI recibe una sola llave; los valores viajan cifrados dentro del repositorio.
+
+```bash
+cemi ci setup --repo acme/shop        # una llave solo para el CI; GitHub la recibe como el secreto CEMI_CI_KEY
+cemi ci export -e prod                # cemi.ci.age: las variables de este proyecto para prod, cifradas
+git add cemi.ci.age cemi.toml && git commit -m "Secretos de CI"
+```
+
+```yaml
+# .github/workflows/deploy.yml
+- uses: hamador0016/cemi@main
+  with:
+    key: ${{ secrets.CEMI_CI_KEY }}
+- run: npm run deploy                 # las variables están puestas, y ocultas en el log
+```
+
+En otros CI, define `CEMI_CI_KEY` y corre `cemi ci load -- <comando>`. `--only` (o `vars` en
+`cemi.toml [ci]`) limita lo que va al CI. Después de cambiar un valor, exporta otra vez. Si la
+llave del CI se filtra, reemplázala (`cemi ci setup --new-key`) y también los valores del
+archivo: las copias viejas del archivo quedan en el historial de git.
+
 ## Nunca subir un secreto
 
 ```bash
@@ -211,7 +234,7 @@ cemi scan --history      # busca tus valores en todo el historial de git
 | Memoria | `note`, `task`, `deps`, `doc` |
 | Ambientes | `env ls/add/rm/diff/protect/unprotect` |
 | Rotación | `origin set/rm`, `dest add/ls/rm`, `verify`, `push`, `check`, `rotate`, `revoke`, `incident`, `approve` |
-| Proyecto | `preset ls/add`, `link`, `var add/rm/ls`, `run`, `types`, `export`, `import` (`--discover` para todos tus proyectos) |
+| Proyecto | `preset ls/add`, `link`, `var add/rm/ls`, `run`, `types`, `ci setup/export/load`, `export`, `import` (`--discover` para todos tus proyectos) |
 | IA | `token create/ls/revoke`, `mcp serve/setup/add/launch/ls/rm` |
 | Git | `scan`, `hook install` |
 

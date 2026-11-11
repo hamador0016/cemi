@@ -209,6 +209,10 @@ pub enum Cmd {
     #[command(subcommand)]
     Preset(PresetCmd),
 
+    /// Secrets for CI: encrypt what CI needs into the repository, open it there with one key
+    #[command(subcommand)]
+    Ci(CiCmd),
+
     /// Point this project at an entity of a vault (creates or updates cemi.toml)
     Link { entity: Option<String> },
     /// Variables of this project's cemi.toml
@@ -715,6 +719,47 @@ pub enum DestKind {
         set: Vec<String>,
         #[arg(long = "secret", value_name = "KEY=REF")]
         secret: Vec<String>,
+    },
+}
+
+#[derive(Subcommand)]
+pub enum CiCmd {
+    /// Make this project's CI key; with --repo, also store it as a GitHub secret
+    Setup {
+        /// GitHub repository (owner/name) that gets the secret CEMI_CI_KEY
+        #[arg(long)]
+        repo: Option<String>,
+        /// GitHub environment for the secret (default: a repository secret)
+        #[arg(long, requires = "repo")]
+        environment: Option<String>,
+        /// Replace the key (export again afterwards)
+        #[arg(long)]
+        new_key: bool,
+    },
+    /// Encrypt this project's variables for one environment into cemi.ci.age (safe to commit)
+    Export {
+        #[arg(short, long, add = ArgValueCompleter::new(crate::complete::envs))]
+        env: String,
+        /// Only these variables (comma separated; default: [ci] vars, or all)
+        #[arg(long, value_delimiter = ',')]
+        only: Vec<String>,
+        /// File to write (default: [ci] file, or cemi.ci.age next to cemi.toml)
+        #[arg(short, long)]
+        output: Option<std::path::PathBuf>,
+    },
+    /// In CI: open the file with CEMI_CI_KEY and pass the values on (no vault needed)
+    #[command(after_help = "Examples:\n  \
+        cemi ci load --github-env          # GitHub Actions: masked, and set for the next steps\n  \
+        cemi ci load -- npm run deploy     # any CI: run one command with the values, hidden in its output")]
+    Load {
+        /// The encrypted file (default: [ci] file of cemi.toml here, or cemi.ci.age)
+        #[arg(long)]
+        file: Option<std::path::PathBuf>,
+        /// Write the values to $GITHUB_ENV, masked in the log
+        #[arg(long, conflicts_with = "command")]
+        github_env: bool,
+        #[arg(trailing_var_arg = true, value_name = "COMMAND")]
+        command: Vec<String>,
     },
 }
 

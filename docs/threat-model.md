@@ -25,6 +25,7 @@ production secrets.
 | A prompt-injected AI changes production | Pushes, rotations and revocations in protected environments (`prod`, `production` by default) need the vault password typed by a person. Through MCP they only create a request for `cemi approve`, which expires in one hour and works once. A token limited to some environments cannot rotate a value shared by all of them. |
 | An AI sends a secret somewhere new | Destinations and origins are set only from the command line, never through MCP. Values travel only over HTTPS (plain http is refused except for localhost). |
 | A failed rotation breaks a service | The new value is saved as pending before anything changes. If a destination or the `verify` check fails, the old value is written back to every destination already changed, and the unused new key is deleted at the provider. |
+| Someone with the repository reads the CI secrets | `cemi.ci.age` is encrypted with age to a key made only for CI, kept in the CI's secret store (`CEMI_CI_KEY`). It holds only the variables of one environment, and only those chosen with `--only` or `[ci] vars`. Exporting a protected environment asks for the password. In GitHub Actions every value is masked in the log. If the CI key leaks, the values in every copy of the file in git history are exposed: replace the key and those values. |
 
 ## What Cemí does NOT protect against
 

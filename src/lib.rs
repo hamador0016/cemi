@@ -1,6 +1,7 @@
 //! Cemí: secrets with memory that your AI can use without seeing.
 
 pub mod audit;
+pub mod ci;
 pub mod cli;
 pub mod cmd;
 pub mod cmd_shared;

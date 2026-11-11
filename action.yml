@@ -1,0 +1,77 @@
+name: Cemí CI secrets
+description: Load the secrets that `cemi ci export` encrypted into the repository, masked in the log
+branding:
+  icon: lock
+  color: green
+
+inputs:
+  key:
+    description: >
+      The CI key. Keep it as the secret CEMI_CI_KEY; `cemi ci setup --repo owner/name` stores it for you.
+    required: true
+  file:
+    description: The encrypted file (default — the [ci] file of cemi.toml, or cemi.ci.age)
+    required: false
+    default: ""
+  working-directory:
+    description: The folder with cemi.toml
+    required: false
+    default: "."
+
+runs:
+  using: composite
+  steps:
+    - name: Where cemi goes
+      id: where
+      shell: bash
+      env:
+        REF: ${{ github.action_ref }}
+      run: echo "dir=$RUNNER_TOOL_CACHE/cemi/${REF:-local}" >> "$GITHUB_OUTPUT"
+
+    - name: Reuse a cemi built before
+      if: github.action_repository != ''
+      uses: actions/cache@v4
+      with:
+        path: ${{ steps.where.outputs.dir }}
+        key: cemi-${{ runner.os }}-${{ runner.arch }}-${{ github.action_ref }}
+
+    - name: Install cemi
+      shell: bash
+      env:
+        DIR: ${{ steps.where.outputs.dir }}
+        REPO: ${{ github.action_repository }}
+        REF: ${{ github.action_ref }}
+        SERVER: ${{ github.server_url }}
+      run: |
+        if [ -x "$DIR/bin/cemi" ] || [ -x "$DIR/bin/cemi.exe" ]; then
+          echo "$DIR/bin" >> "$GITHUB_PATH"
+          exit 0
+        fi
+        if command -v cemi >/dev/null 2>&1; then
+          echo "Using the cemi on PATH: $(cemi --version)"
+          exit 0
+        fi
+        if [ -z "$REPO" ]; then
+          echo "::error::cemi is not installed. A local copy of this action does not install it: install cemi in an earlier step."
+          exit 1
+        fi
+        # Built from the same version as this action, once per runner type.
+        src="$RUNNER_TEMP/cemi-src"
+        git init -q "$src"
+        git -C "$src" fetch -q --depth 1 "$SERVER/$REPO" "$REF"
+        git -C "$src" checkout -q FETCH_HEAD
+        cargo install --locked --path "$src" --root "$DIR"
+        echo "$DIR/bin" >> "$GITHUB_PATH"
+
+    - name: Load the secrets
+      shell: bash
+      working-directory: ${{ inputs.working-directory }}
+      env:
+        CEMI_CI_KEY: ${{ inputs.key }}
+        FILE: ${{ inputs.file }}
+      run: |
+        if [ -n "$FILE" ]; then
+          cemi ci load --github-env --file "$FILE"
+        else
+          cemi ci load --github-env
+        fi

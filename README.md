@@ -195,6 +195,29 @@ can add a provider as a small program. See [docs/connectors.md](docs/connectors.
 `prod` is protected: changes there ask for your password, and an AI that asks for them through
 MCP only creates a request that you approve with `cemi approve`.
 
+## Secrets in CI
+
+CI gets one key; the values travel encrypted inside the repository.
+
+```bash
+cemi ci setup --repo acme/shop        # a key only for CI; GitHub gets it as the secret CEMI_CI_KEY
+cemi ci export -e prod                # cemi.ci.age: this project's variables for prod, encrypted
+git add cemi.ci.age cemi.toml && git commit -m "CI secrets"
+```
+
+```yaml
+# .github/workflows/deploy.yml
+- uses: hamador0016/cemi@main
+  with:
+    key: ${{ secrets.CEMI_CI_KEY }}
+- run: npm run deploy                 # the variables are set, and masked in the log
+```
+
+In other CIs, set `CEMI_CI_KEY` and run `cemi ci load -- <command>`. `--only` (or `vars` in
+`cemi.toml [ci]`) limits what goes to CI. After changing a value, export again. If the CI key
+leaks, replace it (`cemi ci setup --new-key`) and the values in the file too: old copies of the
+file stay in the git history.
+
 ## Never commit a secret
 
 ```bash
@@ -214,7 +237,7 @@ Unlike pattern scanners, `cemi scan` looks for *your* values, whatever their for
 | Memory | `note`, `task`, `deps`, `doc` |
 | Environments | `env ls/add/rm/diff/protect/unprotect` |
 | Rotation | `origin set/rm`, `dest add/ls/rm`, `verify`, `push`, `check`, `rotate`, `revoke`, `incident`, `approve` |
-| Project | `preset ls/add`, `link`, `var add/rm/ls`, `run`, `types`, `export`, `import` (`--discover` for every project) |
+| Project | `preset ls/add`, `link`, `var add/rm/ls`, `run`, `types`, `ci setup/export/load`, `export`, `import` (`--discover` for every project) |
 | AI | `token create/ls/revoke`, `mcp serve/setup/add/launch/ls/rm` |
 | Git | `scan`, `hook install` |
 

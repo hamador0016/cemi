@@ -54,3 +54,43 @@ jobs:
       - uses: gitleaks/gitleaks-action@v2
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+
+  action:
+    name: The GitHub action loads CI secrets
+    runs-on: ubuntu-latest
+    env:
+      CEMI_HOME: ${{ github.workspace }}/../cemi-home
+      CEMI_TEST_SESSION_DIR: ${{ github.workspace }}/../cemi-sessions
+      CEMI_INSECURE_FAST_KDF: "1"
+    steps:
+      - uses: actions/checkout@v5
+      - uses: dtolnay/rust-toolchain@master
+        with:
+          toolchain: "1.99.1"
+      - uses: Swatinem/rust-cache@v2
+      - name: Build cemi
+        run: |
+          cargo build
+          echo "$PWD/target/debug" >> "$GITHUB_PATH"
+      - name: A project with a CI file
+        id: project
+        run: |
+          mkdir -p ../project && cd ../project
+          printf 'a test password for ci\n' | cemi --password-stdin init --global > /dev/null
+          cemi init
+          cemi add api
+          cemi field add api token --secret
+          printf 'value-for-the-action-test' | cemi set api#token -e prod --stdin
+          cemi var add API_TOKEN api#token
+          cemi ci setup
+          printf 'a test password for ci\n' | cemi --password-stdin ci export -e prod
+          key=$(printf 'a test password for ci\n' | cemi --password-stdin reveal cemi-ci#key)
+          echo "::add-mask::$key"
+          echo "key=$key" >> "$GITHUB_OUTPUT"
+          echo "dir=$PWD" >> "$GITHUB_OUTPUT"
+      - uses: ./
+        with:
+          key: ${{ steps.project.outputs.key }}
+          working-directory: ${{ steps.project.outputs.dir }}
+      - name: The next steps have the value
+        run: test "$API_TOKEN" = "value-for-the-action-test"

@@ -1,5 +1,6 @@
 //! Command implementations.
 
+mod ci_cmds;
 mod mcp_cmds;
 mod memory;
 mod project_cmds;
@@ -195,6 +196,7 @@ fn writes(cmd: &Cmd) -> bool {
         Cmd::Incident { rotate, .. } => *rotate,
         Cmd::Task(TaskCmd::Ls) => false,
         Cmd::Preset(PresetCmd::Ls) => false,
+        Cmd::Ci(CiCmd::Export { .. } | CiCmd::Load { .. }) => false,
         Cmd::Token(TokenCmd::Ls) => false,
         Cmd::Mcp(
             McpCmd::Ls | McpCmd::Launch { .. } | McpCmd::Setup { .. } | McpCmd::Serve { .. },
@@ -223,19 +225,29 @@ pub fn run(cli: Cli) -> Result<i32> {
     }
     if cli.json {
         use crate::cli::McpCmd;
+        const OTHER: &str = "its output belongs to another program";
         let name = match &cli.command {
-            Cmd::Run { .. } => Some("run"),
-            Cmd::Mcp(McpCmd::Serve { .. }) => Some("mcp serve"),
-            Cmd::Mcp(McpCmd::Launch { .. }) => Some("mcp launch"),
-            Cmd::Completion { .. } => Some("completion"),
-            Cmd::ClipboardHelper { .. } => Some("__clipboard"),
+            Cmd::Run { .. } => Some(("run", OTHER)),
+            Cmd::Mcp(McpCmd::Serve { .. }) => Some(("mcp serve", OTHER)),
+            Cmd::Mcp(McpCmd::Launch { .. }) => Some(("mcp launch", OTHER)),
+            Cmd::Completion { .. } => Some(("completion", OTHER)),
+            Cmd::Ci(crate::cli::CiCmd::Load { .. }) => Some(("ci load", OTHER)),
+            Cmd::Reveal { .. } => Some(("reveal", "it prints the value alone, ready for a script")),
+            Cmd::ClipboardHelper { .. } => Some(("__clipboard", OTHER)),
             _ => None,
         };
-        if let Some(name) = name {
-            anyhow::bail!(
-                "--json does not apply to `cemi {name}`: its output belongs to another program"
-            );
+        if let Some((name, why)) = name {
+            anyhow::bail!("--json does not apply to `cemi {name}`: {why}");
         }
+    }
+    // Loading in CI needs no vault: nothing is opened.
+    if let Cmd::Ci(crate::cli::CiCmd::Load {
+        file,
+        github_env,
+        command,
+    }) = &cli.command
+    {
+        return ci_cmds::load(file.clone(), *github_env, command);
     }
     if let crate::cli::Cmd::Completion { shell } = cli.command {
         print_completion_setup(shell);
@@ -252,6 +264,15 @@ pub fn run(cli: Cli) -> Result<i32> {
             preset,
         } => vault_cmds::init(&mut ctx, &envs, own_password, &preset),
         C::Preset(c) => project_cmds::preset(&mut ctx, c),
+        C::Ci(crate::cli::CiCmd::Setup {
+            repo,
+            environment,
+            new_key,
+        }) => ci_cmds::setup(&mut ctx, repo, environment, new_key),
+        C::Ci(crate::cli::CiCmd::Export { env, only, output }) => {
+            ci_cmds::export(&mut ctx, &env, &only, output)
+        }
+        C::Ci(crate::cli::CiCmd::Load { .. }) => unreachable!("handled before opening anything"),
         C::Unlock => vault_cmds::unlock(&mut ctx),
         C::Lock => vault_cmds::lock(&mut ctx),
         C::Status => memory::status(&mut ctx),
