@@ -1,11 +1,13 @@
 use std::path::Path;
 
 use anyhow::{Context, Result, anyhow, bail};
+use zeroize::Zeroizing;
 
 use super::Ctx;
 use crate::cli::VarCmd;
+use crate::discover::{self, FoundProject, GitState};
 use crate::dotenv::{self, check_var_name};
-use crate::model::{Field, FieldKind, SHARED, Value, memory_keys as mk};
+use crate::model::{Field, FieldKind, SHARED, Value, memory_keys as mk, validate_name};
 use crate::project::{self, Project};
 use crate::refs::VaultSel;
 use crate::runner;
@@ -183,17 +185,17 @@ pub fn import(
     plain: &str,
     no_link: bool,
 ) -> Result<i32> {
-    let text =
-        std::fs::read_to_string(file).with_context(|| format!("cannot read {}", file.display()))?;
-    let pairs = dotenv::parse(&text)?;
+    let text = Zeroizing::new(
+        std::fs::read_to_string(file).with_context(|| format!("cannot read {}", file.display()))?,
+    );
+    let pairs: Vec<(String, Zeroizing<String>)> = dotenv::parse(&text)?
+        .into_iter()
+        .map(|(k, v)| (k, Zeroizing::new(v)))
+        .collect();
     if pairs.is_empty() {
         bail!("{} has no variables", file.display());
     }
-    let plain: Vec<&str> = plain
-        .split(',')
-        .map(str::trim)
-        .filter(|s| !s.is_empty())
-        .collect();
+    let plain = plain_list(plain);
     let project = if no_link { None } else { ctx.project()? };
 
     // Default destination: the project's base entity.
@@ -213,42 +215,8 @@ pub fn import(
     {
         bail!("environment {e:?} does not exist there; add it with `cemi env add {e}`");
     }
-    let mut created = 0;
-    let mut updated = 0;
-    for (key, value) in &pairs {
-        let id = match v.find_record_in(&entity, key) {
-            Some(r) => {
-                updated += 1;
-                r.id.clone()
-            }
-            None => {
-                created += 1;
-                v.add_record(&entity, key)?
-            }
-        };
-        let rec = v.record_mut(&id);
-        if rec.field("value").is_none() {
-            let kind = if value.contains('\n') {
-                FieldKind::Multiline
-            } else {
-                FieldKind::Text
-            };
-            rec.fields
-                .push(Field::new("value", kind, !plain.contains(&key.as_str())));
-        }
-        rec.memory
-            .entry(mk::USED_IN.to_string())
-            .or_insert_with(|| format!("imported from {}", file.display()));
-        let f = rec.field_mut("value").expect("ensured");
-        f.values
-            .entry(env.unwrap_or(SHARED).to_string())
-            .or_default()
-            .push(
-                Value::text(value.as_str()),
-                "cli",
-                Some(format!("import {}", file.display())),
-            );
-    }
+    let source = file.display().to_string();
+    let n = store_vars(v, &entity, env, &pairs, &plain, &source)?;
     v.save()?;
     ctx.audit_detail(
         scope,
@@ -258,37 +226,489 @@ pub fn import(
         Some(format!("{} variables", pairs.len())),
     );
     ui::ok(format!(
-        "Imported {} variables into {} ({created} new, {updated} updated)",
+        "Imported {} variables into {} ({})",
         pairs.len(),
-        display_path(&path)
+        display_path(&path),
+        n.summary()
     ));
 
     if let Some(p) = project {
-        let (base_sel, base) = p.base()?;
-        let base_scope = ctx.ws.scope_for(base_sel)?;
-        Project::edit(&p.path, |doc| {
-            if doc.get("env").is_none() {
-                doc["env"] = toml_edit::table();
-            }
-            for (key, _) in &pairs {
-                let reference = if base_scope == scope && path.starts_with(&base) {
-                    let mut rel: Vec<String> = path[base.len()..].to_vec();
-                    rel.push(key.clone());
-                    format!("{}#value", rel.join("/"))
-                } else {
-                    let mut abs = path.clone();
-                    abs.push(key.clone());
-                    format!("{scope}:{}#value", abs.join("/"))
-                };
-                doc["env"][key.as_str()] = toml_edit::value(reference);
-            }
-            Ok(())
-        })?;
-        ui::ok(format!("Added them to {}", p.path.display()));
+        let keys: Vec<String> = pairs.iter().map(|(k, _)| k.clone()).collect();
+        let linked = link_vars(ctx, &p.path, scope, &path, &keys)?;
+        ui::ok(format!(
+            "Added {} variables to {}",
+            linked.added.len(),
+            p.path.display()
+        ));
+        for k in &linked.kept {
+            ui::warn(format!(
+                "{k} was already in {}; left as it was",
+                p.path.display()
+            ));
+        }
     }
     ui::warn(format!(
         "{} still has the plain values. Delete it once `cemi run` works for you.",
         file.display()
     ));
     Ok(0)
+}
+
+fn plain_list(plain: &str) -> Vec<String> {
+    plain
+        .split(',')
+        .map(str::trim)
+        .filter(|s| !s.is_empty())
+        .map(str::to_string)
+        .collect()
+}
+
+#[derive(Default)]
+struct Stored {
+    created: usize,
+    updated: usize,
+    unchanged: usize,
+}
+
+impl Stored {
+    fn summary(&self) -> String {
+        let mut parts = vec![
+            format!("{} new", self.created),
+            format!("{} updated", self.updated),
+        ];
+        if self.unchanged > 0 {
+            parts.push(format!("{} already there", self.unchanged));
+        }
+        parts.join(", ")
+    }
+}
+
+/// Stores variables as records of `entity`, one record per variable with a
+/// field "value" (secret unless listed in `plain`). A variable whose current
+/// value is already the same gets no new version.
+fn store_vars(
+    v: &mut crate::vault::Vault,
+    entity: &str,
+    env: Option<&str>,
+    pairs: &[(String, Zeroizing<String>)],
+    plain: &[String],
+    source: &str,
+) -> Result<Stored> {
+    let mut n = Stored::default();
+    for (key, value) in pairs {
+        let (id, new) = match v.find_record_in(entity, key) {
+            Some(r) => (r.id.clone(), false),
+            None => (v.add_record(entity, key)?, true),
+        };
+        let rec = v.record_mut(&id);
+        if rec.field("value").is_none() {
+            let kind = if value.contains('\n') {
+                FieldKind::Multiline
+            } else {
+                FieldKind::Text
+            };
+            rec.fields
+                .push(Field::new("value", kind, !plain.contains(key)));
+        }
+        rec.memory
+            .entry(mk::USED_IN.to_string())
+            .or_insert_with(|| format!("imported from {source}"));
+        let f = rec.field_mut("value").expect("ensured");
+        let slot = f
+            .values
+            .entry(env.unwrap_or(SHARED).to_string())
+            .or_default();
+        let same = match slot.current() {
+            Some(Value::Text { text }) => text.expose() == value.as_str(),
+            _ => false,
+        };
+        if same {
+            n.unchanged += 1;
+            continue;
+        }
+        slot.push(
+            Value::text(value.as_str()),
+            "cli",
+            Some(format!("import {source}")),
+        );
+        if new {
+            n.created += 1;
+        } else {
+            n.updated += 1;
+        }
+    }
+    Ok(n)
+}
+
+struct Linked {
+    added: Vec<String>,
+    /// Variables the file already had; they are not changed.
+    kept: Vec<String>,
+}
+
+/// Adds `keys` (records of `path` in `scope`, field "value") to the [env]
+/// table of a project file, creating the file if needed. References are
+/// relative when the file's base is that entity, absolute otherwise.
+fn link_vars(
+    ctx: &Ctx,
+    file: &Path,
+    scope: Scope,
+    path: &[String],
+    keys: &[String],
+) -> Result<Linked> {
+    if !file.exists() {
+        let entity = (!path.is_empty()).then(|| path.join("/"));
+        crate::vault::atomic_write(
+            file,
+            project::template(Some(&scope.to_string()), entity.as_deref()).as_bytes(),
+        )?;
+    }
+    let p = Project::load(file)?;
+    let (base_sel, base) = p.base()?;
+    let base_scope = match base_sel {
+        // A file without `vault =` uses the project's local vault if there is
+        // one: look from the project's own folder.
+        VaultSel::Default => {
+            if crate::workspace::find_local(p.dir(), &ctx.ws.global_dir).is_some() {
+                Scope::Local
+            } else {
+                Scope::Global
+            }
+        }
+        VaultSel::Global => Scope::Global,
+        VaultSel::Local => Scope::Local,
+    };
+    let mut linked = Linked {
+        added: Vec::new(),
+        kept: Vec::new(),
+    };
+    Project::edit(file, |doc| {
+        if doc.get("env").is_none() {
+            doc["env"] = toml_edit::table();
+        }
+        for key in keys {
+            let exists = ["env", "files"].iter().any(|t| {
+                doc.get(t)
+                    .and_then(|t| t.as_table_like())
+                    .is_some_and(|t| t.contains_key(key))
+            });
+            if exists {
+                linked.kept.push(key.clone());
+                continue;
+            }
+            let reference = if base_scope == scope && path.starts_with(&base) {
+                let mut rel: Vec<String> = path[base.len()..].to_vec();
+                rel.push(key.clone());
+                format!("{}#value", rel.join("/"))
+            } else {
+                let mut abs = path.to_vec();
+                abs.push(key.clone());
+                format!("{scope}:{}#value", abs.join("/"))
+            };
+            doc["env"][key.as_str()] = toml_edit::value(reference);
+            linked.added.push(key.clone());
+        }
+        Ok(())
+    })?;
+    Ok(linked)
+}
+
+pub struct DiscoverOptions<'a> {
+    pub root: &'a Path,
+    pub into: Option<&'a str>,
+    pub env: Option<&'a str>,
+    pub plain: &'a str,
+    pub depth: usize,
+    pub yes: bool,
+    pub no_link: bool,
+}
+
+/// `cemi import --discover`: finds the .env files under a folder, shows what
+/// it found and what looks wrong, and imports them after a yes.
+pub fn discover(ctx: &mut Ctx, o: DiscoverOptions) -> Result<i32> {
+    let root = std::fs::canonicalize(o.root)
+        .with_context(|| format!("cannot open {}", o.root.display()))?;
+    let root = without_verbatim_prefix(root);
+    let projects = discover::find(&root, o.depth)?;
+    if projects.is_empty() {
+        println!(
+            "No .env files under {} (looked {} folders deep; change it with --depth)",
+            root.display(),
+            o.depth
+        );
+        return Ok(0);
+    }
+    if let Some(e) = o.env {
+        validate_name(e, "environment")?;
+    }
+    let (sel, base) = ctx.entity_path(o.into)?;
+    // Projects live all over the disk: their keys go to the global vault
+    // unless --into names the local one.
+    let sel = match sel {
+        VaultSel::Default => VaultSel::Global,
+        s => s,
+    };
+    let scope = ctx.ws.scope_for(sel)?;
+    let target = |p: &FoundProject| -> Vec<String> {
+        let mut t = base.clone();
+        t.push(p.name.clone());
+        t
+    };
+
+    // What was found.
+    let files: usize = projects.iter().map(|p| p.files.len()).sum();
+    println!(
+        "Found {files} .env file{} in {} folder{} under {}",
+        plural(files),
+        projects.len(),
+        plural(projects.len()),
+        root.display()
+    );
+    let shown_dir = |p: &FoundProject| relative(&root, &p.dir);
+    for p in &projects {
+        println!();
+        println!("  {}  →  {scope}:{}", shown_dir(p), target(p).join("/"));
+        for f in &p.files {
+            let env = env_shown(o.env.unwrap_or(&f.env));
+            match &f.error {
+                Some(e) => println!("    {:<26} cannot be read: {e}", f.name()),
+                None => println!(
+                    "    {:<26} {:<10} {} variable{}",
+                    f.name(),
+                    env,
+                    f.vars.len(),
+                    plural(f.vars.len())
+                ),
+            }
+        }
+    }
+
+    // What looks wrong.
+    let now = jiff::Timestamp::now();
+    let mut warnings: Vec<String> = Vec::new();
+    for p in &projects {
+        for f in &p.files {
+            let shown = format!("{}/{}", p.name, f.name());
+            match f.git {
+                GitState::Tracked => warnings.push(format!(
+                    "{shown} is committed to git: anyone with the repository has these keys. \
+                     After importing, replace them (`cemi incident <ref> --rotate`) and remove the file from git"
+                )),
+                GitState::Unprotected => warnings.push(format!(
+                    "{shown} is not in .gitignore: one `git add .` away from being committed"
+                )),
+                GitState::Ignored | GitState::NoRepo => {}
+            }
+            if f.is_old(now)
+                && let Some(m) = f.modified
+            {
+                warnings.push(format!(
+                    "{shown} has not changed since {}: its keys may be due for rotation",
+                    ui::when(m, "%Y-%m-%d")
+                ));
+            }
+        }
+    }
+    for r in discover::repeated(&projects) {
+        let places: Vec<String> = r
+            .places
+            .iter()
+            .map(|(p, f, k)| format!("{k} in {p}/{f}"))
+            .collect();
+        warnings.push(format!(
+            "The same value is in {}: keep it once and point the projects at it, \
+             so a rotation reaches all of them",
+            places.join(", ")
+        ));
+    }
+    if !warnings.is_empty() {
+        println!();
+        for w in &warnings {
+            println!("! {w}");
+        }
+    }
+
+    let readable: Vec<&FoundProject> = projects
+        .iter()
+        .filter(|p| {
+            p.files
+                .iter()
+                .any(|f| f.error.is_none() && !f.vars.is_empty())
+        })
+        .collect();
+    if readable.is_empty() {
+        return Ok(0);
+    }
+    println!();
+    let vault_exists = match scope {
+        Scope::Global => ctx.ws.global_exists(),
+        Scope::Local => ctx.ws.dir(scope).is_ok(),
+    };
+    if !vault_exists {
+        println!(
+            "To import them, create the {scope} vault first ({}), then run this again.",
+            match scope {
+                Scope::Global => "`cemi init --global`",
+                Scope::Local => "`cemi init`",
+            }
+        );
+        return Ok(0);
+    }
+    let question = format!(
+        "Import them into the {scope} vault{}?",
+        if o.no_link {
+            ""
+        } else {
+            " and add the variables to each folder's cemi.toml"
+        }
+    );
+    if !o.yes && !ui::confirm(&question) {
+        println!("Nothing imported. Run it again with --yes to import.");
+        return Ok(0);
+    }
+
+    // Import. Unlocking once up front stops here on a wrong password, instead
+    // of failing once per project.
+    ctx.ws.open(scope)?;
+    let plain = plain_list(o.plain);
+    let mut failed = 0;
+    for p in readable {
+        let path = target(p);
+        let shown = shown_dir(p);
+        if let Err(e) = import_project(ctx, scope, &path, p, &shown, o.env, &plain, o.no_link) {
+            failed += 1;
+            ui::warn(format!("{shown}: {e:#}"));
+        }
+    }
+    if failed == 0 {
+        println!();
+        println!(
+            "Next: in each folder, `cemi run -e dev -- <your command>`. Once it works, delete the .env files."
+        );
+    }
+    Ok(if failed > 0 { 1 } else { 0 })
+}
+
+/// Windows' canonical paths start with \\?\, which people do not write.
+fn without_verbatim_prefix(p: std::path::PathBuf) -> std::path::PathBuf {
+    let text = p.to_string_lossy();
+    if let Some(rest) = text.strip_prefix(r"\\?\UNC\") {
+        return std::path::PathBuf::from(format!(r"\\{rest}"));
+    }
+    match text.strip_prefix(r"\\?\") {
+        Some(rest) => std::path::PathBuf::from(rest),
+        None => p,
+    }
+}
+
+#[allow(clippy::too_many_arguments)]
+fn import_project(
+    ctx: &mut Ctx,
+    scope: Scope,
+    path: &[String],
+    p: &FoundProject,
+    shown: &str,
+    env_override: Option<&str>,
+    plain: &[String],
+    no_link: bool,
+) -> Result<()> {
+    // Variables per environment; with --env, every file goes to one.
+    let mut merged: std::collections::BTreeMap<String, Vec<(String, Zeroizing<String>)>> =
+        std::collections::BTreeMap::new();
+    for (env, vars) in p.merged() {
+        let env = env_override.map(str::to_string).unwrap_or(env);
+        let list = merged.entry(env).or_default();
+        for (k, v) in vars {
+            match list.iter_mut().find(|(key, _)| *key == k) {
+                Some(slot) => slot.1 = v,
+                None => list.push((k, v)),
+            }
+        }
+    }
+    let source = p.dir.display().to_string();
+    let v = ctx.ws.open(scope)?;
+    let entity = v.ensure_entity(path)?;
+    let mut added_envs = Vec::new();
+    for env in merged.keys() {
+        if env != SHARED && !v.effective_envs(&entity).contains(env) {
+            v.entity_mut(&entity).envs.push(env.clone());
+            added_envs.push(env.clone());
+        }
+    }
+    let mut total = Stored::default();
+    for (env, pairs) in &merged {
+        let n = store_vars(v, &entity, Some(env), pairs, plain, &source)?;
+        total.created += n.created;
+        total.updated += n.updated;
+        total.unchanged += n.unchanged;
+    }
+    v.save()?;
+    for (env, pairs) in &merged {
+        ctx.audit_detail(
+            scope,
+            "import",
+            Some(display_path(path)),
+            (env != SHARED).then_some(env.as_str()),
+            Some(format!("{} variables from {source}", pairs.len())),
+        );
+    }
+    let envs: Vec<&str> = merged.keys().map(|e| env_shown(e)).collect();
+    ui::ok(format!(
+        "{shown} → {scope}:{} ({}; {})",
+        path.join("/"),
+        envs.join(", "),
+        total.summary()
+    ));
+    if !added_envs.is_empty() {
+        ui::ok(format!(
+            "  Added environment{} {} to {}",
+            plural(added_envs.len()),
+            added_envs.join(", "),
+            display_path(path)
+        ));
+    }
+    if !no_link {
+        let mut keys: Vec<String> = merged
+            .values()
+            .flat_map(|pairs| pairs.iter().map(|(k, _)| k.clone()))
+            .collect();
+        keys.sort();
+        keys.dedup();
+        let file = p.dir.join(project::FILE);
+        let linked = link_vars(ctx, &file, scope, path, &keys)?;
+        let file_shown = Path::new(shown).join(project::FILE);
+        if !linked.added.is_empty() {
+            ui::ok(format!(
+                "  Added {} variable{} to {}",
+                linked.added.len(),
+                plural(linked.added.len()),
+                file_shown.display()
+            ));
+        }
+        if !linked.kept.is_empty() {
+            ui::warn(format!(
+                "  {} already had {}; left as it was",
+                file_shown.display(),
+                linked.kept.join(", ")
+            ));
+        }
+    }
+    Ok(())
+}
+
+fn env_shown(env: &str) -> &str {
+    if env == SHARED { "all" } else { env }
+}
+
+/// `dir` as people read it under the folder they searched.
+fn relative(root: &Path, dir: &Path) -> String {
+    match dir.strip_prefix(root) {
+        Ok(rel) if rel.as_os_str().is_empty() => ".".to_string(),
+        Ok(rel) => rel.display().to_string(),
+        Err(_) => dir.display().to_string(),
+    }
+}
+
+fn plural(n: usize) -> &'static str {
+    if n == 1 { "" } else { "s" }
 }

@@ -6,6 +6,7 @@ pub mod cmd;
 pub mod cmd_shared;
 pub mod connectors;
 pub mod crypto;
+pub mod discover;
 pub mod dotenv;
 pub mod mcp;
 pub mod model;

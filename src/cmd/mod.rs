@@ -258,19 +258,40 @@ pub fn run(cli: Cli) -> Result<i32> {
         } => project_cmds::run(ctx, env.as_deref(), redact, &command),
         C::Export { output } => project_cmds::export(&mut ctx, output),
         C::Import {
-            file,
+            path,
+            discover,
             into,
             env,
             plain,
             no_link,
-        } => project_cmds::import(
-            &mut ctx,
-            &file,
-            into.as_deref(),
-            env.as_deref(),
-            &plain,
-            no_link,
-        ),
+            depth,
+            yes,
+        } => {
+            if discover {
+                let root = path.unwrap_or_else(|| ctx.ws.cwd.clone());
+                project_cmds::discover(
+                    &mut ctx,
+                    project_cmds::DiscoverOptions {
+                        root: &root,
+                        into: into.as_deref(),
+                        env: env.as_deref(),
+                        plain: &plain,
+                        depth,
+                        yes,
+                        no_link,
+                    },
+                )
+            } else {
+                project_cmds::import(
+                    &mut ctx,
+                    &path.expect("required by clap"),
+                    into.as_deref(),
+                    env.as_deref(),
+                    &plain,
+                    no_link,
+                )
+            }
+        }
         C::Origin(c) => rotation_cmds::origin(&mut ctx, c),
         C::Dest(c) => rotation_cmds::dest(&mut ctx, c),
         C::Verify {

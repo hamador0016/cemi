@@ -72,6 +72,32 @@ cemi status
 The local vault opens with your global password. Shared keys can live in the global vault and
 be referenced from any project: `cemi var add CF_TOKEN global:accounts/cloudflare#token`.
 
+## Already have .env files?
+
+```bash
+cemi import --discover ~/code
+```
+
+Cemí finds the `.env` files of every project under that folder (skipping `node_modules`,
+build output and `.env.example`) and shows what it found before changing anything:
+
+```text
+  shop  →  global:shop
+    .env                       all        2 variables
+    .env.local                 dev        1 variable
+    .env.production            prod       1 variable
+
+! shop/.env.production is committed to git: anyone with the repository has these keys. …
+! web/.env is not in .gitignore: one `git add .` away from being committed
+! The same value is in PAYMENTS in web/.env, STRIPE_KEY in shop/.env.local: …
+! api/.env.staging has not changed since 2024-01-01: its keys may be due for rotation
+```
+
+After a yes, each project gets an entity in the global vault and a `cemi.toml` that points at
+it. The environment comes from the file name: `.env` is for every environment, and
+`.env.<env>` and `.env.local` override it, the way most loaders read them. Then
+`cemi run -e dev -- <your command>` in each folder, and the `.env` files can go.
+
 ## With an AI assistant
 
 ```bash
@@ -151,7 +177,7 @@ Unlike pattern scanners, `cemi scan` looks for *your* values, whatever their for
 | Memory | `note`, `task`, `deps`, `doc` |
 | Environments | `env ls/add/rm/diff/protect/unprotect` |
 | Rotation | `origin set/rm`, `dest add/ls/rm`, `verify`, `push`, `check`, `rotate`, `revoke`, `incident`, `approve` |
-| Project | `link`, `var add/rm/ls`, `run`, `export`, `import` |
+| Project | `link`, `var add/rm/ls`, `run`, `export`, `import` (`--discover` for every project) |
 | AI | `token create/ls/revoke`, `mcp serve/setup/add/launch/ls/rm` |
 | Git | `scan`, `hook install` |
 

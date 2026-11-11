@@ -183,13 +183,22 @@ pub enum Cmd {
         #[arg(short, long)]
         output: Option<std::path::PathBuf>,
     },
-    /// Import a .env file: one record per variable
+    /// Import a .env file (one record per variable), or find the .env files of all your projects
+    #[command(after_help = "Examples:\n  \
+        cemi import .env -e dev\n  \
+        cemi import --discover ~/code          # show what it finds, then ask\n  \
+        cemi import --discover ~/code --yes    # import without asking")]
     Import {
-        file: std::path::PathBuf,
-        /// Entity to put the records in
+        /// The .env file; with --discover, the folder to search (default: this one)
+        #[arg(value_name = "PATH", required_unless_present = "discover")]
+        path: Option<std::path::PathBuf>,
+        /// Find .env files in every project under PATH, warn about the risky ones and import them
+        #[arg(long)]
+        discover: bool,
+        /// Entity to put the records in (with --discover: one entity per project inside it)
         #[arg(long)]
         into: Option<String>,
-        /// Environment, like dev or prod (default: the value shared by all)
+        /// Environment, like dev or prod (default: the value shared by all; with --discover, guessed from each file name)
         #[arg(short, long)]
         env: Option<String>,
         /// Variables that are not secret, comma separated
@@ -198,6 +207,12 @@ pub enum Cmd {
         /// Do not add the variables to cemi.toml
         #[arg(long)]
         no_link: bool,
+        /// With --discover: how many folders deep to look
+        #[arg(long, default_value_t = 5, requires = "discover")]
+        depth: usize,
+        /// With --discover: import without asking
+        #[arg(short, long, requires = "discover")]
+        yes: bool,
     },
 
     /// Where a key is created, per environment (used by `cemi rotate`)

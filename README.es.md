@@ -72,6 +72,35 @@ cemi status
 La bóveda del proyecto se abre con tu contraseña global. Las llaves compartidas pueden vivir en
 la global y usarse desde cualquier proyecto: `cemi var add CF_TOKEN global:cuentas/cloudflare#token`.
 
+## ¿Ya tienes archivos .env?
+
+```bash
+cemi import --discover ~/code
+```
+
+Cemí busca los `.env` de cada proyecto dentro de esa carpeta (sin entrar a `node_modules`, a
+las carpetas de compilación ni a los `.env.example`) y muestra lo que encontró antes de cambiar
+nada:
+
+```text
+  shop  →  global:shop
+    .env                       all        2 variables
+    .env.local                 dev        1 variable
+    .env.production            prod       1 variable
+
+! shop/.env.production is committed to git: anyone with the repository has these keys. …
+! web/.env is not in .gitignore: one `git add .` away from being committed
+! The same value is in PAYMENTS in web/.env, STRIPE_KEY in shop/.env.local: …
+! api/.env.staging has not changed since 2024-01-01: its keys may be due for rotation
+```
+
+Avisa de los `.env` subidos a git, de los que no están en `.gitignore`, de valores repetidos
+entre proyectos y de archivos que no cambian hace más de un año. Si dices que sí, cada proyecto
+recibe una entidad en la bóveda global y un `cemi.toml` que apunta a ella. El ambiente sale del
+nombre del archivo: `.env` vale para todos, y `.env.<ambiente>` y `.env.local` lo
+sobrescriben, igual que los leen la mayoría de las herramientas. Después, `cemi run -e dev --
+<tu comando>` en cada carpeta, y los `.env` se pueden borrar.
+
 ## Con un asistente de IA
 
 ```bash
@@ -145,7 +174,7 @@ cemi scan --history      # busca tus valores en todo el historial de git
 | Memoria | `note`, `task`, `deps`, `doc` |
 | Ambientes | `env ls/add/rm/diff/protect/unprotect` |
 | Rotación | `origin set/rm`, `dest add/ls/rm`, `verify`, `push`, `check`, `rotate`, `revoke`, `incident`, `approve` |
-| Proyecto | `link`, `var add/rm/ls`, `run`, `export`, `import` |
+| Proyecto | `link`, `var add/rm/ls`, `run`, `export`, `import` (`--discover` para todos tus proyectos) |
 | IA | `token create/ls/revoke`, `mcp serve/setup/add/launch/ls/rm` |
 | Git | `scan`, `hook install` |
 
