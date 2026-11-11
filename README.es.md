@@ -9,8 +9,7 @@ sirve cada uno, dónde se usa y cómo reemplazarlo. Tus proyectos corren con ell
 los asistentes de IA (Claude, ChatGPT, Cursor… por MCP) pueden usarlos sin recibir nunca los
 valores.
 
-*Un cemí es un espíritu protector taíno, guardado en objetos tallados. Como "git", el nombre no
-describe lo que hace la herramienta.*
+*El nombre viene del cemí taíno, una figura tallada que protegía lo que su dueño valoraba.*
 
 > **Estado: v0.1, temprana.** El formato y los comandos todavía pueden cambiar. Lee
 > [docs/threat-model.md](docs/threat-model.md) antes de confiarle secretos de producción.
@@ -43,7 +42,7 @@ describe lo que hace la herramienta.*
 ## Instalar
 
 ```bash
-cargo install --git https://github.com/OWNER/cemi --locked
+cargo install --git https://github.com/hamador0016/cemi --locked
 ```
 
 Con la primera versión publicada: `cargo install cemi`, `npm install -g cemi`, Homebrew y un
@@ -94,9 +93,12 @@ cemi mcp add supabase --env SUPABASE_ACCESS_TOKEN=global:cuentas/supabase#token 
 # En el cliente de IA, el comando pasa a ser: cemi mcp launch supabase
 ```
 
-**Límite honesto:** un comando que corre con un secreto en su entorno puede filtrarlo, y ocultar
-la salida solo atrapa las codificaciones comunes. Por eso la IA solo corre comandos que tú
-permites, en los ambientes que tú eliges. Ver [docs/threat-model.md](docs/threat-model.md).
+**Lo que ocultar la salida no cubre.** Un comando que recibe un secreto en su entorno todavía
+puede enviarlo a otro lado o imprimirlo en una codificación que Cemí no reconoce. Cemí lo
+reduce: la IA solo corre los comandos que tú listas, en los ambientes que tú listas. El proxy
+de credenciales previsto para la v0.3 lo cierra para las API HTTP, porque el comando nunca
+recibe la llave. Mientras tanto, no dejes que una IA corra comandos con secretos de
+producción. Detalles en [docs/threat-model.md](docs/threat-model.md).
 
 ## Nunca subir un secreto
 
@@ -122,13 +124,16 @@ Las referencias tienen la forma `[global:|local:]entidad/registro#campo`.
 
 ## Próximas versiones
 
-- **v0.2**: orígenes y destinos. Cemí sabe dónde nace cada llave (Supabase, Cloudflare…) y
-  adónde se copia (secretos de GitHub, `.env` de un servidor…), así `cemi rotate` crea una llave
-  nueva, actualiza cada destino, verifica y revoca la vieja, con tu aprobación.
-- **v0.3**: app de escritorio y proxy de credenciales.
-- **v0.4**: sincronizar entre tus máquinas y compartir una entidad.
+- **v0.2**: rotación. Cemí sabe dónde nace cada llave y adónde se copia (secretos de GitHub,
+  Supabase, archivos `.env`…), así `cemi rotate` crea una llave nueva, actualiza cada destino,
+  verifica y revoca la vieja, con tu aprobación.
+- **v0.3**: uso diario: encontrar los `.env` que ya tienes, autocompletado, tipos para tu código,
+  secretos en CI.
+- **v0.4**: app de escritorio y proxy de credenciales (la IA llama a las API sin recibir la
+  llave).
+- **v0.5**: sincronizar entre tus máquinas y compartir una entidad con otra persona.
 
-Diseño completo: [docs/design.es.md](docs/design.es.md).
+Plan completo: [docs/roadmap.es.md](docs/roadmap.es.md). Diseño: [docs/design.es.md](docs/design.es.md).
 
 ## Licencia
 

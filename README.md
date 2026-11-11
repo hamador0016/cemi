@@ -9,8 +9,7 @@ what each one is for, where it is used and how to replace it. Your projects run 
 injected, and AI assistants (Claude, ChatGPT, Cursor… through MCP) can use them without
 ever receiving the values.
 
-*A cemí is a protective spirit of the Taíno people, kept in carved objects. Like "git",
-the name does not describe what the tool does.*
+*The name comes from the Taíno cemí, a carved figure that guarded what its owners valued.*
 
 > **Status: v0.1, early.** The format and commands may still change. Read
 > [docs/threat-model.md](docs/threat-model.md) before trusting it with production secrets.
@@ -44,7 +43,7 @@ the name does not describe what the tool does.*
 Cemí is a single executable.
 
 ```bash
-cargo install --git https://github.com/OWNER/cemi --locked
+cargo install --git https://github.com/hamador0016/cemi --locked
 ```
 
 Coming with the first release: `cargo install cemi`, `npm install -g cemi`, Homebrew and
@@ -97,9 +96,12 @@ cemi mcp add supabase --env SUPABASE_ACCESS_TOKEN=global:accounts/supabase#token
 # In the AI client, the command becomes: cemi mcp launch supabase
 ```
 
-**Honest limit:** a command that runs with a secret in its environment can leak it, and output
-redaction catches only common encodings. That is why AI clients can only run commands you
-allowlist, in environments you choose. See [docs/threat-model.md](docs/threat-model.md).
+**What redaction does not cover.** A command that receives a secret in its environment can
+still send it elsewhere or print it in an encoding Cemí does not recognize. Cemí narrows this
+down: AI clients can only run the commands you list, in the environments you list. The
+credential proxy planned for v0.3 closes it for HTTP APIs, because the command never receives
+the key. Until then, do not let an AI run commands with production secrets. Details in
+[docs/threat-model.md](docs/threat-model.md).
 
 ## Never commit a secret
 
@@ -139,12 +141,15 @@ Design notes (Spanish): [docs/design.es.md](docs/design.es.md).
 
 ## Roadmap
 
-- **v0.2**: origins and destinations — Cemí knows where each key is born (Supabase, Cloudflare…)
-  and where it is copied (GitHub secrets, `.env` on a server…), so `cemi rotate` creates a new
-  key, updates every destination, verifies and revokes the old one, with your approval.
-- **v0.3**: desktop app, credential proxy (the AI calls APIs without the key ever entering its
-  process).
-- **v0.4**: sync between your machines and sharing one entity with someone else.
+- **v0.2**: rotation. Cemí knows where each key is born and where it is copied (GitHub secrets,
+  Supabase, `.env` files…), so `cemi rotate` creates a new key, updates every destination,
+  verifies and revokes the old one, with your approval.
+- **v0.3**: daily use: discover existing `.env` files, shell completions, types for your code,
+  secrets in CI.
+- **v0.4**: desktop app and credential proxy (the AI calls APIs without receiving the key).
+- **v0.5**: sync between your machines and sharing one entity with someone else.
+
+Full plan: [docs/roadmap.md](docs/roadmap.md).
 
 ## License
 

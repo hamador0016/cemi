@@ -40,7 +40,7 @@
 1. **Lo que ya existe guarda bien los valores, pero olvida el contexto.** Doppler, Infisical, Vault, 1Password, Bitwarden, SOPS o dotenvx resuelven "dónde pongo la llave y cómo llega al programa". Ninguno trata como parte central *para qué sirve, dónde está copiada, cómo se regenera y qué pasa si se pierde*. Casi todos los equipos terminan anotándolo a mano en un documento aparte.
 2. **El hueco más grande es rotar y propagar.** Cuando una llave se filtra hay que crear otra en el proveedor, copiarla a cada lugar donde se usa, redesplegar, verificar y revocar la vieja. Cemí sabe de dónde nace cada llave y adónde va, así que lo hace con un comando, o lo hace una IA **sin que el valor pase por el chat** y con tu aprobación.
 3. **La IA usa, no ve.** Hay varias herramientas nuevas (2025–2026) con esa idea, pero ninguna la junta con una estructura que define el usuario, con memoria ni con rotación de punta a punta. Tampoco con Windows bien soportado.
-4. **Límite honesto:** si una IA ejecuta código arbitrario con la llave en su entorno, puede filtrarla. La protección real es que el valor nunca entre en un proceso que la IA controla, más tu aprobación por un canal que la IA no puede tocar.
+4. **Límite:** si una IA ejecuta código arbitrario con la llave en su entorno, puede filtrarla. La protección real es que el valor nunca entre en un proceso que la IA controla, más tu aprobación por un canal que la IA no puede tocar.
 5. **Cómo:** Rust, un solo ejecutable, local primero, formato abierto **age** (si Cemí desaparece, tus datos se abren con `age` estándar). Se instala con un comando, como git.
 
 ---
@@ -115,7 +115,7 @@ Un desarrollador con unos pocos proyectos ya maneja decenas de llaves. Por ejemp
 | 8 | **"Escribir sin leer"** | La IA pide: rota, guarda y empuja; o "pide el valor al humano" en una ventana propia | El valor va del proveedor al destino sin pasar por el chat | Depende de conectores confiables |
 | 9 | **Auditoría** | Cada uso registrado sin valores, encadenado con hash | Saber qué pasó | Detecta, no previene |
 
-### 3.2 Límites honestos (van tal cual en la documentación pública)
+### 3.2 Límites (van en la documentación pública)
 
 1. Una IA que ejecuta código arbitrario con la llave en su entorno puede filtrarla. Los patrones 2–3 solo valen para desarrollo o con lista blanca y aprobación.
 2. **"Tríada letal"** (Simon Willison, 2025): datos privados + contenido no confiable + comunicación hacia afuera = fuga posible. Para producción hay que quitar un lado: que la IA no tenga el valor (proxy, conectores) o que no pueda actuar sin un humano.
@@ -495,9 +495,12 @@ Los comandos van en inglés, como git, para que cualquier desarrollador los adiv
 | Versión | Contenido | Listo cuando |
 |---|---|---|
 | **v0.1** | Bóveda, estructura, ambientes, memoria, `status`, `run`, `cemi.toml`, `doc`, `import`/`export`, MCP de solo memoria + `ask_value` + `generate` + `run` en dev, `mcp launch`, tokens, auditoría, `scan`, instaladores | El autor deja de copiar llaves a mano para desarrollar y ninguna IA vuelve a ver un valor |
-| **v0.2** | Orígenes, destinos, huellas, historial con estados. Conectores **GitHub, Supabase, `.env` local y de comando**. `push`, `check`, `rotate`, `incident`, aprobación nativa con PIN/biometría; MCP `push`, `rotate`, `propose_*` | Una llave filtrada se rota y se actualiza en todos sus destinos con un comando |
-| **v0.3** | App Tauri, proxy de credenciales, `run` en prod, conectores Cloudflare, SSH, Resend, Netlify, Vercel | Probar APIs de producción sin que la IA tenga el valor |
-| **v0.4** | Sincronizar entre máquinas propias; compartir una entidad | Un segundo desarrollador recibe solo `acme/tienda` dev |
+| **v0.2** | Orígenes, destinos, huellas. Conectores **GitHub, Supabase, `.env` local y de comando** (más externos `cemi-connector-*`). `push`, `check`, `rotate`, `incident`; aprobación con la contraseña de la bóveda escrita por una persona; MCP `check`, `push`, `rotate` | Una llave filtrada se rota y se actualiza en todos sus destinos con un comando |
+| **v0.3** | Uso diario: `import --discover`, autocompletado, buscador, `cemi types`, presets, `--json`, secretos en CI, extensión de VS Code | Quien instala Cemí pasa sus `.env` el primer día y sigue usándola |
+| **v0.4** | App de escritorio con Windows Hello / Touch ID, proxy de credenciales, `run` en prod, conectores Cloudflare, SSH, Resend, Netlify, Vercel | Probar APIs de producción sin que la IA tenga el valor |
+| **v0.5** | Sincronizar entre máquinas propias; compartir una entidad | Un segundo desarrollador recibe solo `acme/tienda` dev |
+
+El detalle vive en [roadmap.es.md](roadmap.es.md).
 
 Todas las versiones compilan y pasan pruebas en Windows, macOS y Linux desde el día uno. Windows es la plataforma donde más se prueba al inicio.
 
