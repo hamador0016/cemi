@@ -4,6 +4,7 @@ pub mod audit;
 pub mod cli;
 pub mod cmd;
 pub mod cmd_shared;
+pub mod complete;
 pub mod connectors;
 pub mod crypto;
 pub mod discover;

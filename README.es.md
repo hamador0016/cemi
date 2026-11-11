@@ -49,6 +49,10 @@ Con la primera versión publicada: `cargo install cemi`, `npm install -g cemi`, 
 script de instalación, y también `npm install --save-dev cemi` o `mise use cemi` para fijarlo
 por proyecto.
 
+Autocompletado con Tab, incluidos los nombres de tus registros y ambientes mientras la bóveda
+está abierta: `cemi completion powershell` (o `bash`, `zsh`, `fish`, `elvish`) imprime la línea
+para el perfil de tu terminal.
+
 ## Primeros pasos
 
 ```bash

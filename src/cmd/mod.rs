@@ -144,6 +144,30 @@ pub(crate) fn reauthenticate(ctx: &Ctx, scope: Scope, why: &str) -> Result<()> {
     Ok(())
 }
 
+/// The line that turns on completion in a shell. The shell asks `cemi`
+/// itself each time, so completion stays right after updates.
+fn print_completion_setup(shell: crate::cli::Shell) {
+    use crate::cli::Shell;
+    let (file, line) = match shell {
+        Shell::Bash => ("~/.bashrc", "source <(COMPLETE=bash cemi)"),
+        Shell::Zsh => ("~/.zshrc", "source <(COMPLETE=zsh cemi)"),
+        Shell::Fish => (
+            "~/.config/fish/completions/cemi.fish",
+            "COMPLETE=fish cemi | source",
+        ),
+        Shell::Powershell => (
+            "$PROFILE",
+            r#"$env:COMPLETE = "powershell"; cemi | Out-String | Invoke-Expression; Remove-Item Env:\COMPLETE"#,
+        ),
+        Shell::Elvish => (
+            "~/.config/elvish/rc.elv",
+            "eval (E:COMPLETE=elvish cemi | slurp)",
+        ),
+    };
+    eprintln!("Add this line to {file}, then open a new terminal:");
+    println!("{line}");
+}
+
 /// Commands that change a vault take its lock for writing.
 fn writes(cmd: &Cmd) -> bool {
     use crate::cli::*;
@@ -193,6 +217,10 @@ fn writes(cmd: &Cmd) -> bool {
 pub fn run(cli: Cli) -> Result<i32> {
     if cli.password_stdin {
         ui::use_password_stdin();
+    }
+    if let crate::cli::Cmd::Completion { shell } = cli.command {
+        print_completion_setup(shell);
+        return Ok(0);
     }
     let write = writes(&cli.command);
     let global = cli.global;
@@ -362,6 +390,7 @@ pub fn run(cli: Cli) -> Result<i32> {
             history,
         } => scan_cmds::scan(&mut ctx, path, staged, history),
         C::Hook(c) => scan_cmds::hook(&mut ctx, c),
+        C::Completion { .. } => unreachable!("handled before opening anything"),
         C::ClipboardHelper { seconds } => values::clipboard_helper(seconds),
     }
 }

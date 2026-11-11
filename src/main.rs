@@ -1,4 +1,4 @@
-use clap::Parser;
+use clap::{CommandFactory, Parser};
 
 /// The command line is large; Windows gives the main thread only 1 MiB of
 /// stack, which debug builds outgrow. Run everything on a thread with room.
@@ -9,6 +9,8 @@ fn main() {
         .name("cemi".into())
         .stack_size(STACK)
         .spawn(|| {
+            // `COMPLETE=<shell> cemi …` answers the shell and exits here.
+            clap_complete::CompleteEnv::with_factory(cemi::cli::Cli::command).complete();
             let cli = cemi::cli::Cli::parse();
             match cemi::cmd::run(cli) {
                 Ok(code) => code,

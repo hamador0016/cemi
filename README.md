@@ -49,6 +49,10 @@ cargo install --git https://github.com/hamador0016/cemi --locked
 Coming with the first release: `cargo install cemi`, `npm install -g cemi`, Homebrew and
 an install script, plus `npm install --save-dev cemi` or `mise use cemi` to pin it per project.
 
+Tab completion, including your record and environment names while the vault is unlocked:
+`cemi completion powershell` (or `bash`, `zsh`, `fish`, `elvish`) prints the line for your
+shell's profile.
+
 ## Quick start
 
 ```bash

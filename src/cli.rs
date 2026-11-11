@@ -1,6 +1,7 @@
 //! Command-line interface. Commands are short and predictable, like git's.
 
 use clap::{Parser, Subcommand};
+use clap_complete::ArgValueCompleter;
 
 use crate::model::{Every, FieldKind, Permission};
 
@@ -56,17 +57,27 @@ pub enum Cmd {
     /// List entities and records (never values)
     Ls {
         /// Entity path to start from
+        #[arg(add = ArgValueCompleter::new(crate::complete::entities))]
         path: Option<String>,
         /// Include archived records
         #[arg(long)]
         all: bool,
     },
     /// Create a record (and any entity on its path): cemi add acme/shop/stripe
-    Add { path: String },
+    Add {
+        #[arg(add = ArgValueCompleter::new(crate::complete::entities))]
+        path: String,
+    },
     /// Rename or move a record
-    Mv { from: String, to: String },
+    Mv {
+        #[arg(add = ArgValueCompleter::new(crate::complete::records))]
+        from: String,
+        #[arg(add = ArgValueCompleter::new(crate::complete::entities))]
+        to: String,
+    },
     /// Archive a record (or delete it for good with --purge)
     Rm {
+        #[arg(add = ArgValueCompleter::new(crate::complete::records))]
         path: String,
         #[arg(long)]
         purge: bool,
@@ -77,14 +88,18 @@ pub enum Cmd {
     /// Search names and memory
     Find { text: String },
     /// A record's fields (secret values hidden), memory and history summary
-    Show { reference: String },
+    Show {
+        #[arg(add = ArgValueCompleter::new(crate::complete::records))]
+        reference: String,
+    },
 
     /// Store a value (typed hidden, or piped with --stdin). Never as an argument.
     Set {
         /// record#field
+        #[arg(add = ArgValueCompleter::new(crate::complete::references))]
         reference: String,
         /// Environment; without it the value is shared by all environments
-        #[arg(short, long)]
+        #[arg(short, long, add = ArgValueCompleter::new(crate::complete::envs))]
         env: Option<String>,
         /// Read the value from standard input
         #[arg(long)]
@@ -101,9 +116,10 @@ pub enum Cmd {
     },
     /// Generate a random value and store it without showing it
     Generate {
+        #[arg(add = ArgValueCompleter::new(crate::complete::references))]
         reference: String,
         /// Environment, like dev or prod (default: the value shared by all)
-        #[arg(short, long)]
+        #[arg(short, long, add = ArgValueCompleter::new(crate::complete::envs))]
         env: Option<String>,
         #[arg(long, default_value_t = 40)]
         length: usize,
@@ -114,33 +130,37 @@ pub enum Cmd {
     },
     /// Copy a value to the clipboard for 30 seconds (kept out of clipboard history)
     Copy {
+        #[arg(add = ArgValueCompleter::new(crate::complete::references))]
         reference: String,
         /// Environment, like dev or prod (default: the value shared by all)
-        #[arg(short, long)]
+        #[arg(short, long, add = ArgValueCompleter::new(crate::complete::envs))]
         env: Option<String>,
     },
     /// Print a value. Asks for the master password again.
     Reveal {
+        #[arg(add = ArgValueCompleter::new(crate::complete::references))]
         reference: String,
         /// Environment, like dev or prod (default: the value shared by all)
-        #[arg(short, long)]
+        #[arg(short, long, add = ArgValueCompleter::new(crate::complete::envs))]
         env: Option<String>,
     },
     /// Versions of a value (dates and notes, never the values)
     History {
+        #[arg(add = ArgValueCompleter::new(crate::complete::references))]
         reference: String,
         /// Environment, like dev or prod (default: the value shared by all)
-        #[arg(short, long)]
+        #[arg(short, long, add = ArgValueCompleter::new(crate::complete::envs))]
         env: Option<String>,
     },
     /// Make an older version current again
     Revert {
+        #[arg(add = ArgValueCompleter::new(crate::complete::references))]
         reference: String,
         /// Version number from `cemi history` (1, 2, …)
         #[arg(value_name = "VERSION")]
         number: usize,
         /// Environment, like dev or prod (default: the value shared by all)
-        #[arg(short, long)]
+        #[arg(short, long, add = ArgValueCompleter::new(crate::complete::envs))]
         env: Option<String>,
     },
 
@@ -150,10 +170,14 @@ pub enum Cmd {
     #[command(subcommand)]
     Task(TaskCmd),
     /// What uses this value (templates and this project's cemi.toml)
-    Deps { reference: String },
+    Deps {
+        #[arg(add = ArgValueCompleter::new(crate::complete::references))]
+        reference: String,
+    },
     /// Write a Markdown inventory without values
     Doc {
         /// Entity path (default: everything)
+        #[arg(add = ArgValueCompleter::new(crate::complete::entities))]
         entity: Option<String>,
         /// Output file (default: standard output)
         #[arg(short, long)]
@@ -170,7 +194,7 @@ pub enum Cmd {
     Var(VarCmd),
     /// Run a command with this project's secrets injected
     Run {
-        #[arg(short, long, env = "CEMI_ENV")]
+        #[arg(short, long, env = "CEMI_ENV", add = ArgValueCompleter::new(crate::complete::envs))]
         env: Option<String>,
         /// Hide secret values in the output (the command loses its terminal)
         #[arg(long)]
@@ -196,10 +220,10 @@ pub enum Cmd {
         #[arg(long)]
         discover: bool,
         /// Entity to put the records in (with --discover: one entity per project inside it)
-        #[arg(long)]
+        #[arg(long, add = ArgValueCompleter::new(crate::complete::entities))]
         into: Option<String>,
         /// Environment, like dev or prod (default: the value shared by all; with --discover, guessed from each file name)
-        #[arg(short, long)]
+        #[arg(short, long, add = ArgValueCompleter::new(crate::complete::envs))]
         env: Option<String>,
         /// Variables that are not secret, comma separated
         #[arg(long, default_value = "")]
@@ -224,9 +248,10 @@ pub enum Cmd {
     /// Set a command that checks a value works (it gets the value on stdin)
     Verify {
         /// record#field
+        #[arg(add = ArgValueCompleter::new(crate::complete::references))]
         reference: String,
         /// Environment, like dev or prod (default: the value shared by all)
-        #[arg(short, long)]
+        #[arg(short, long, add = ArgValueCompleter::new(crate::complete::envs))]
         env: Option<String>,
         /// Remove the check
         #[arg(long, conflicts_with = "command")]
@@ -241,9 +266,10 @@ pub enum Cmd {
     /// Send current values to the destinations that are missing them or are out of date
     Push {
         /// record#field (default: every field with destinations)
+        #[arg(add = ArgValueCompleter::new(crate::complete::references))]
         reference: Option<String>,
         /// Only the destinations of this environment
-        #[arg(short, long)]
+        #[arg(short, long, add = ArgValueCompleter::new(crate::complete::envs))]
         env: Option<String>,
         /// Send without checking first: also overwrites values changed outside Cemí
         #[arg(long)]
@@ -251,9 +277,10 @@ pub enum Cmd {
     },
     /// Compare destinations with the vault: out of date, changed outside Cemí, missing
     Check {
+        #[arg(add = ArgValueCompleter::new(crate::complete::references))]
         reference: Option<String>,
         /// Environment, like dev or prod (default: the value shared by all)
-        #[arg(short, long)]
+        #[arg(short, long, add = ArgValueCompleter::new(crate::complete::envs))]
         env: Option<String>,
         /// Do not contact providers; compare with what Cemí last sent
         #[arg(long)]
@@ -262,9 +289,10 @@ pub enum Cmd {
     /// Replace a key everywhere: create it, send it, verify it, revoke the old one
     Rotate {
         /// record#field
+        #[arg(add = ArgValueCompleter::new(crate::complete::references))]
         reference: String,
         /// Environment, like dev or prod (default: the value shared by all)
-        #[arg(short, long)]
+        #[arg(short, long, add = ArgValueCompleter::new(crate::complete::envs))]
         env: Option<String>,
         /// The old key leaked: revoke it as soon as the new one works
         #[arg(long)]
@@ -288,9 +316,10 @@ pub enum Cmd {
     },
     /// Revoke an old version of a key at its origin
     Revoke {
+        #[arg(add = ArgValueCompleter::new(crate::complete::references))]
         reference: String,
         /// Environment, like dev or prod (default: the value shared by all)
-        #[arg(short, long)]
+        #[arg(short, long, add = ArgValueCompleter::new(crate::complete::envs))]
         env: Option<String>,
         /// Version number from `cemi history`
         #[arg(
@@ -309,10 +338,10 @@ pub enum Cmd {
     /// A key leaked: what it reaches, who used it, and how to replace it
     Incident {
         /// record#field (one or more)
-        #[arg(required = true)]
+        #[arg(required = true, add = ArgValueCompleter::new(crate::complete::references))]
         references: Vec<String>,
         /// Environment, like dev or prod (default: the value shared by all)
-        #[arg(short, long)]
+        #[arg(short, long, add = ArgValueCompleter::new(crate::complete::envs))]
         env: Option<String>,
         /// Rotate them now (as leaked)
         #[arg(long)]
@@ -357,9 +386,27 @@ pub enum Cmd {
     #[command(subcommand)]
     Hook(HookCmd),
 
+    /// Tab completion for your shell, including record and environment names
+    #[command(
+        after_help = "Names come from vaults that are already unlocked; completing never asks for a password."
+    )]
+    Completion {
+        #[arg(value_enum)]
+        shell: Shell,
+    },
+
     /// Internal: keeps a copied value on the clipboard, then clears it
     #[command(hide = true, name = "__clipboard")]
     ClipboardHelper { seconds: u64 },
+}
+
+#[derive(Clone, Copy, clap::ValueEnum)]
+pub enum Shell {
+    Bash,
+    Zsh,
+    Fish,
+    Powershell,
+    Elvish,
 }
 
 #[derive(Clone, Copy, clap::ValueEnum)]
@@ -389,6 +436,7 @@ pub enum FieldCmd {
     /// Add a field: cemi field add acme/shop/stripe secret --secret
     Add {
         /// Record path
+        #[arg(add = ArgValueCompleter::new(crate::complete::records))]
         record: String,
         name: String,
         #[arg(long = "type", value_enum, default_value_t = FieldKind::Text)]
@@ -401,6 +449,7 @@ pub enum FieldCmd {
     Rm { reference: String },
     /// Change a field's type or secrecy
     Edit {
+        #[arg(add = ArgValueCompleter::new(crate::complete::references))]
         reference: String,
         #[arg(long = "type", value_enum)]
         kind: Option<FieldKind>,
@@ -414,6 +463,7 @@ pub enum FieldCmd {
 #[derive(clap::Args)]
 pub struct NoteArgs {
     /// Record or entity path
+    #[arg(add = ArgValueCompleter::new(crate::complete::records))]
     pub path: String,
     #[arg(long)]
     pub purpose: Option<String>,
@@ -446,6 +496,7 @@ pub struct NoteArgs {
 pub enum TaskCmd {
     /// cemi task add acme "restore test" --every month
     Add {
+        #[arg(add = ArgValueCompleter::new(crate::complete::entities))]
         entity: String,
         name: String,
         #[arg(long, value_enum)]
@@ -453,10 +504,12 @@ pub enum TaskCmd {
     },
     /// Mark a task as done today
     Done {
+        #[arg(add = ArgValueCompleter::new(crate::complete::entities))]
         entity: String,
         name: String,
     },
     Rm {
+        #[arg(add = ArgValueCompleter::new(crate::complete::entities))]
         entity: String,
         name: String,
     },
@@ -466,25 +519,25 @@ pub enum TaskCmd {
 #[derive(Subcommand)]
 pub enum EnvCmd {
     Ls {
-        #[arg(long)]
+        #[arg(long, add = ArgValueCompleter::new(crate::complete::entities))]
         at: Option<String>,
     },
     Add {
         name: String,
         /// Entity that gets the environment (inherited below it)
-        #[arg(long)]
+        #[arg(long, add = ArgValueCompleter::new(crate::complete::entities))]
         at: Option<String>,
     },
     Rm {
         name: String,
-        #[arg(long)]
+        #[arg(long, add = ArgValueCompleter::new(crate::complete::entities))]
         at: Option<String>,
     },
     /// What is missing in one environment, and secrets that are equal in both
     Diff {
         a: String,
         b: String,
-        #[arg(long)]
+        #[arg(long, add = ArgValueCompleter::new(crate::complete::entities))]
         at: Option<String>,
     },
     /// Changes in this environment need the password (AI clients need `cemi approve`)
@@ -498,18 +551,20 @@ pub enum OriginCmd {
     /// cemi origin set acme/shop/supabase#key -e prod supabase-key --project abcd --token global:accounts/supabase#token
     Set {
         /// record#field
+        #[arg(add = ArgValueCompleter::new(crate::complete::references))]
         reference: String,
         /// Environment, like dev or prod (default: the value shared by all)
-        #[arg(short, long)]
+        #[arg(short, long, add = ArgValueCompleter::new(crate::complete::envs))]
         env: Option<String>,
         #[command(subcommand)]
         kind: OriginKind,
     },
     /// Forget the origin
     Rm {
+        #[arg(add = ArgValueCompleter::new(crate::complete::references))]
         reference: String,
         /// Environment, like dev or prod (default: the value shared by all)
-        #[arg(short, long)]
+        #[arg(short, long, add = ArgValueCompleter::new(crate::complete::envs))]
         env: Option<String>,
     },
 }
@@ -552,9 +607,10 @@ pub enum DestCmd {
     /// cemi dest add acme/shop/stripe#key -e prod github --repo acme/shop --name STRIPE_KEY
     Add {
         /// record#field
+        #[arg(add = ArgValueCompleter::new(crate::complete::references))]
         reference: String,
         /// Environment whose value goes there (default: the value shared by all)
-        #[arg(short, long)]
+        #[arg(short, long, add = ArgValueCompleter::new(crate::complete::envs))]
         env: Option<String>,
         #[command(subcommand)]
         kind: DestKind,
@@ -563,6 +619,7 @@ pub enum DestCmd {
     Ls { reference: Option<String> },
     /// Forget a destination (nothing is deleted there)
     Rm {
+        #[arg(add = ArgValueCompleter::new(crate::complete::references))]
         reference: String,
         /// Id from `cemi dest ls`
         id: String,
