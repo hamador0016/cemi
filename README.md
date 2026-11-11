@@ -11,7 +11,7 @@ ever receiving the values.
 
 *The name comes from the Taíno cemí, a carved figure that guarded what its owners valued.*
 
-> **Status: v0.1, early.** The format and commands may still change. Read
+> **Status: v0.2, early.** The format and commands may still change. Read
 > [docs/threat-model.md](docs/threat-model.md) before trusting it with production secrets.
 
 ## Why
@@ -88,6 +88,8 @@ test = { cmd = ["npm", "test"], envs = ["dev"] }
 
 The AI can now see your records and notes, ask what needs attention, generate secrets and run
 `test` with the keys injected. Values in the output come back as `[hidden:DATABASE_URL]`.
+With `--allow push --allow rotate` it can also check destinations and replace a leaked key
+without seeing it; in protected environments it only asks, and you approve.
 
 Other MCP servers usually want a token in their configuration file. Keep it in Cemí instead:
 
@@ -102,6 +104,33 @@ down: AI clients can only run the commands you list, in the environments you lis
 credential proxy planned for v0.4 closes it for HTTP APIs, because the command never receives
 the key. Until then, do not let an AI run commands with production secrets. Details in
 [docs/threat-model.md](docs/threat-model.md).
+
+## Rotate a key everywhere
+
+Tell Cemí where each key is created and where it is copied, once:
+
+```bash
+cemi origin set shop/supabase#key -e prod supabase-key --project abcdefghijklmnopqrst --token global:accounts/supabase#token
+cemi dest add shop/supabase#key -e prod github --repo acme/shop --name SUPABASE_KEY --environment production
+cemi dest add shop/supabase#key -e prod dotenv --file .env.production --key SUPABASE_KEY
+cemi verify shop/supabase#key -e prod -- npm run check:supabase
+```
+
+From then on:
+
+```bash
+cemi check                                   # out of date, changed outside Cemí, missing
+cemi push                                    # send current values where they are missing
+cemi rotate shop/supabase#key -e prod        # new key → every destination → check → revoke the old one
+cemi incident shop/supabase#key -e prod      # it leaked: where it is, who used it; --rotate replaces it
+```
+
+If a destination or the check fails, the old key goes back everywhere. Built in: GitHub
+Actions secrets, Supabase API keys and function secrets, `.env` files and any command; anyone
+can add a provider as a small program. See [docs/connectors.md](docs/connectors.md).
+
+`prod` is protected: changes there ask for your password, and an AI that asks for them through
+MCP only creates a request that you approve with `cemi approve`.
 
 ## Never commit a secret
 
@@ -120,7 +149,8 @@ Unlike pattern scanners, `cemi scan` looks for *your* values, whatever their for
 | Structure | `ls`, `add`, `mv`, `rm`, `field add/rm/edit`, `find`, `show` |
 | Values | `set`, `generate`, `copy`, `reveal`, `history`, `revert` |
 | Memory | `note`, `task`, `deps`, `doc` |
-| Environments | `env ls/add/rm/diff` |
+| Environments | `env ls/add/rm/diff/protect/unprotect` |
+| Rotation | `origin set/rm`, `dest add/ls/rm`, `verify`, `push`, `check`, `rotate`, `revoke`, `incident`, `approve` |
 | Project | `link`, `var add/rm/ls`, `run`, `export`, `import` |
 | AI | `token create/ls/revoke`, `mcp serve/setup/add/launch/ls/rm` |
 | Git | `scan`, `hook install` |
@@ -141,9 +171,7 @@ Design notes (Spanish): [docs/design.es.md](docs/design.es.md).
 
 ## Roadmap
 
-- **v0.2**: rotation. Cemí knows where each key is born and where it is copied (GitHub secrets,
-  Supabase, `.env` files…), so `cemi rotate` creates a new key, updates every destination,
-  verifies and revokes the old one, with your approval.
+- **v0.2** (this version): rotation, with origins, destinations and approvals.
 - **v0.3**: daily use: discover existing `.env` files, shell completions, types for your code,
   secrets in CI.
 - **v0.4**: desktop app and credential proxy (the AI calls APIs without receiving the key).

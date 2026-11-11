@@ -4,6 +4,7 @@ use anyhow::{Context, Result, anyhow, bail};
 
 use super::Ctx;
 use crate::cli::VarCmd;
+use crate::dotenv::{self, check_var_name};
 use crate::model::{Field, FieldKind, SHARED, Value, memory_keys as mk};
 use crate::project::{self, Project};
 use crate::refs::VaultSel;
@@ -120,16 +121,6 @@ pub fn var(ctx: &mut Ctx, cmd: VarCmd) -> Result<i32> {
     }
 }
 
-fn check_var_name(name: &str) -> Result<()> {
-    let ok = !name.is_empty()
-        && !name.starts_with(|c: char| c.is_ascii_digit())
-        && name.chars().all(|c| c.is_ascii_alphanumeric() || c == '_');
-    if !ok {
-        bail!("{name:?} is not a valid environment variable name (letters, digits and _)");
-    }
-    Ok(())
-}
-
 pub fn run(mut ctx: Ctx, env: Option<&str>, redact: bool, command: &[String]) -> Result<i32> {
     let project = ctx.require_project()?;
     let plan = runner::plan(&mut ctx.ws, &project, env)?;
@@ -184,75 +175,6 @@ pub fn export(ctx: &mut Ctx, output: Option<std::path::PathBuf>) -> Result<i32> 
     Ok(0)
 }
 
-/// Parses a .env file. Supports `export`, quotes, comments and escaped newlines.
-pub fn parse_dotenv(text: &str) -> Result<Vec<(String, String)>> {
-    let mut out = Vec::new();
-    let mut lines = text.lines().enumerate().peekable();
-    while let Some((n, raw)) = lines.next() {
-        let line = raw.trim();
-        if line.is_empty() || line.starts_with('#') {
-            continue;
-        }
-        let line = line.strip_prefix("export ").unwrap_or(line);
-        let (key, rest) = line
-            .split_once('=')
-            .ok_or_else(|| anyhow!("line {}: expected KEY=VALUE", n + 1))?;
-        let key = key.trim().to_string();
-        check_var_name(&key).with_context(|| format!("line {}", n + 1))?;
-        let rest = rest.trim_start();
-        let value = if let Some(q) = rest.chars().next().filter(|c| *c == '"' || *c == '\'') {
-            let mut body = rest[1..].to_string();
-            // Quoted values may span lines.
-            while !closes(&body, q) {
-                match lines.next() {
-                    Some((_, more)) => {
-                        body.push('\n');
-                        body.push_str(more);
-                    }
-                    None => bail!("line {}: unclosed quote", n + 1),
-                }
-            }
-            let end = closing_index(&body, q).expect("checked");
-            let inner = &body[..end];
-            if q == '"' {
-                inner
-                    .replace("\\n", "\n")
-                    .replace("\\\"", "\"")
-                    .replace("\\\\", "\\")
-            } else {
-                inner.to_string()
-            }
-        } else {
-            // Unquoted: drop a trailing comment.
-            match rest.find(" #") {
-                Some(i) => rest[..i].trim_end().to_string(),
-                None => rest.trim_end().to_string(),
-            }
-        };
-        out.push((key, value));
-    }
-    Ok(out)
-}
-
-fn closing_index(body: &str, q: char) -> Option<usize> {
-    let mut escaped = false;
-    for (i, c) in body.char_indices() {
-        if q == '"' && c == '\\' && !escaped {
-            escaped = true;
-            continue;
-        }
-        if c == q && !escaped {
-            return Some(i);
-        }
-        escaped = false;
-    }
-    None
-}
-
-fn closes(body: &str, q: char) -> bool {
-    closing_index(body, q).is_some()
-}
-
 pub fn import(
     ctx: &mut Ctx,
     file: &Path,
@@ -263,7 +185,7 @@ pub fn import(
 ) -> Result<i32> {
     let text =
         std::fs::read_to_string(file).with_context(|| format!("cannot read {}", file.display()))?;
-    let pairs = parse_dotenv(&text)?;
+    let pairs = dotenv::parse(&text)?;
     if pairs.is_empty() {
         bail!("{} has no variables", file.display());
     }
@@ -306,16 +228,13 @@ pub fn import(
         };
         let rec = v.record_mut(&id);
         if rec.field("value").is_none() {
-            rec.fields.push(Field {
-                name: "value".into(),
-                kind: if value.contains('\n') {
-                    FieldKind::Multiline
-                } else {
-                    FieldKind::Text
-                },
-                secret: !plain.contains(&key.as_str()),
-                values: Default::default(),
-            });
+            let kind = if value.contains('\n') {
+                FieldKind::Multiline
+            } else {
+                FieldKind::Text
+            };
+            rec.fields
+                .push(Field::new("value", kind, !plain.contains(&key.as_str())));
         }
         rec.memory
             .entry(mk::USED_IN.to_string())
@@ -372,22 +291,4 @@ pub fn import(
         file.display()
     ));
     Ok(0)
-}
-
-#[cfg(test)]
-mod tests {
-    use super::*;
-
-    #[test]
-    fn parses_dotenv() {
-        let text = "# comment\nA=1\nexport B = two words # note\nC=\"x\\ny\"\nD='it''s'\nE=\"multi\nline\"\nF=\n";
-        let v = parse_dotenv(text).unwrap();
-        assert_eq!(v[0], ("A".into(), "1".into()));
-        assert_eq!(v[1], ("B".into(), "two words".into()));
-        assert_eq!(v[2], ("C".into(), "x\ny".into()));
-        assert_eq!(v[3], ("D".into(), "it".into()));
-        assert_eq!(v[4], ("E".into(), "multi\nline".into()));
-        assert_eq!(v[5], ("F".into(), "".into()));
-        assert!(parse_dotenv("1A=x").is_err());
-    }
 }

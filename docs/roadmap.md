@@ -10,7 +10,7 @@ its tests on Windows, macOS and Linux.
 Vaults, free structure, environments, memory, `status`, `run`, `cemi.toml`, `import`/`export`,
 MCP server with scoped tokens, `mcp launch`, audit log, `scan` and the pre-commit hook.
 
-## v0.2 — Rotation (in progress)
+## v0.2 — Rotation (done)
 
 - **Origins and destinations.** Cemí knows where each key is born and every place it is copied
   to, per environment.
@@ -22,7 +22,7 @@ MCP server with scoped tokens, `mcp launch`, audit log, `scan` and the pre-commi
 - `cemi push`, `cemi check`, `cemi rotate` (plan → approve → create → propagate → verify →
   confirm → revoke, with automatic rollback) and `cemi incident` for leaked keys.
 - **Approval** that an AI cannot give: production changes need the vault password typed by a
-  person.
+  person; requests from AI clients wait for `cemi approve`.
 - MCP tools `check`, `push` and `rotate`; the AI receives plans and results, never values.
 
 *Done when:* a leaked key is replaced everywhere it is used with one command.

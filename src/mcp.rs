@@ -3,7 +3,9 @@
 //! project command and hides them in its output.
 //!
 //! The server never asks for the password. If the vault is locked, tools fail
-//! and ask the human to run `cemi unlock`: a person stays in the loop.
+//! and ask the human to run `cemi unlock`: a person stays in the loop. Pushes
+//! and rotations in protected environments become requests that a person
+//! approves with `cemi approve`.
 
 use std::path::PathBuf;
 use std::time::Duration;
@@ -19,9 +21,10 @@ use zeroize::Zeroizing;
 use crate::audit;
 use crate::cmd_shared::{attention, generate_value, record_summary};
 use crate::crypto;
-use crate::model::{Permission, Record, Token};
+use crate::model::{Approval, ApprovalAction, Permission, Record, Token};
 use crate::project::Project;
 use crate::refs::{Ref, VaultSel};
+use crate::rotation::{self, FieldRef, NewValue, PushOutcome, RotateOptions};
 use crate::runner;
 use crate::ui;
 use crate::vault::{Header, Scope, Vault};
@@ -72,6 +75,37 @@ pub struct RunParams {
     pub command: String,
     /// Environment to run in, like "dev".
     pub env: String,
+}
+
+#[derive(Deserialize, schemars::JsonSchema, Default)]
+pub struct CheckParams {
+    /// "record#field". Omit to check every destination you can see.
+    #[serde(default)]
+    pub reference: Option<String>,
+    /// Only destinations of this environment.
+    #[serde(default)]
+    pub env: Option<String>,
+}
+
+#[derive(Deserialize, schemars::JsonSchema)]
+pub struct PushParams {
+    /// "record#field" whose destinations should get the current value.
+    pub reference: String,
+    pub env: String,
+}
+
+#[derive(Deserialize, schemars::JsonSchema)]
+pub struct RotateParams {
+    /// "record#field" to replace.
+    pub reference: String,
+    pub env: String,
+    /// True when the old key leaked: it is revoked as soon as the new one works.
+    #[serde(default)]
+    pub leaked: bool,
+    /// True to let Cemí make a random value instead of asking the key's origin
+    /// (only for services that accept any value, like a webhook secret you define).
+    #[serde(default)]
+    pub generate: bool,
 }
 
 fn text(s: impl Into<String>) -> CallToolResult {
@@ -130,6 +164,42 @@ impl Access {
             bail!("this token cannot use the {env} environment");
         }
         Ok(())
+    }
+
+    /// A field the token may see, in this server's vault.
+    fn field(&mut self, reference: &str) -> Result<FieldRef> {
+        let mut r = Ref::parse(reference)?;
+        r.require_field()?;
+        let rec = self.record(&r.record_path())?;
+        r.vault = crate::resolve::sel_for(self.scope);
+        let fr = FieldRef::find(&mut self.ws, &r)?;
+        debug_assert_eq!(fr.record_id, rec.id);
+        Ok(fr)
+    }
+
+    /// Stores a request for a person to approve.
+    fn request(&mut self, action: ApprovalAction) -> Result<String> {
+        let now = jiff::Timestamp::now();
+        let a = Approval {
+            id: crypto::new_id()[..8].to_string(),
+            requested_by: format!("mcp:{}", self.token.name),
+            action: action.clone(),
+            created: now,
+            expires: now
+                .checked_add(jiff::SignedDuration::from_hours(1))
+                .unwrap_or(now),
+        };
+        let id = a.id.clone();
+        let v = self.vault();
+        v.put_approval(a);
+        v.save()?;
+        self.audit(
+            "approve.request",
+            Some(action.to_string()),
+            None,
+            Some(id.clone()),
+        );
+        Ok(id)
     }
 
     fn record(&mut self, path: &str) -> Result<Record> {
@@ -296,7 +366,9 @@ impl CemiServer {
         a.require(Permission::Read)?;
         let allowed = a.allowed_entities();
         let v = a.vault();
-        let items = attention(v, Some(&allowed));
+        let mut items = attention(v, Some(&allowed));
+        let scope = a.scope;
+        items.extend(rotation::attention(&mut a.ws, scope, Some(&allowed)));
         if items.is_empty() {
             return Ok("Nothing needs attention.".into());
         }
@@ -362,6 +434,127 @@ impl CemiServer {
             "Generated and stored a new {length}-character value for {r}{}. You will not see it; use it through `run`.",
             p.env.map(|e| format!(" in {e}")).unwrap_or_default()
         ))
+    }
+
+    fn do_check(&self, p: CheckParams) -> Result<String> {
+        let mut a = self.access(false)?;
+        a.require(Permission::Read)?;
+        a.require_env(p.env.as_deref())?;
+        let only = match &p.reference {
+            Some(r) => Some(a.field(r)?),
+            None => None,
+        };
+        let allowed = a.allowed_entities();
+        let scope = a.scope;
+        let dests: Vec<_> = rotation::all_destinations(&mut a.ws, only.as_ref(), p.env.as_deref())?
+            .into_iter()
+            .filter(|d| d.field.scope == scope)
+            .filter(|d| {
+                a.ws.get(scope)
+                    .and_then(|v| v.records.get(&d.field.record_id))
+                    .is_some_and(|r| allowed.contains(&r.entity))
+            })
+            .collect();
+        if dests.is_empty() {
+            return Ok(
+                "No destinations to check. The human adds them with `cemi dest add`.".into(),
+            );
+        }
+        let mut out = String::new();
+        for d in &dests {
+            let line = rotation::check_one(&mut a.ws, d, true);
+            out.push_str(&format!(
+                "- {} ({}) → {}: {}\n",
+                line.field,
+                line.env,
+                line.describe,
+                line.status.label()
+            ));
+        }
+        Ok(out)
+    }
+
+    fn do_push(&self, p: PushParams) -> Result<String> {
+        let mut a = self.access(true)?;
+        a.require(Permission::Push)?;
+        a.require_env(Some(&p.env))?;
+        let fr = a.field(&p.reference)?;
+        let name = fr.text(&mut a.ws);
+        let dests = rotation::all_destinations(&mut a.ws, Some(&fr), Some(&p.env))?;
+        if dests.is_empty() {
+            bail!(
+                "{name} has no destinations for {}. The human adds them with `cemi dest add`",
+                p.env
+            );
+        }
+        if !rotation::needs_approval(&mut a.ws, Some(&p.env), &dests).is_empty() {
+            let id = a.request(ApprovalAction::Push {
+                reference: name.clone(),
+                env: p.env.clone(),
+            })?;
+            return Ok(format!(
+                "{} is protected, so this needs a person. Ask the human to run `cemi approve {id}` in a terminal (the request expires in 1 hour).",
+                p.env
+            ));
+        }
+        let actor = format!("mcp:{}", a.token.name);
+        let mut out = String::new();
+        for d in &dests {
+            let line = rotation::check_one(&mut a.ws, d, false);
+            match rotation::push_one(&mut a.ws, d, false, &actor) {
+                Ok(PushOutcome::Sent) => out.push_str(&format!("- sent to {}\n", line.describe)),
+                Ok(PushOutcome::AlreadyThere) => {
+                    out.push_str(&format!("- {} already had it\n", line.describe))
+                }
+                Err(e) => out.push_str(&format!("- {} failed: {e:#}\n", line.describe)),
+            }
+        }
+        Ok(out)
+    }
+
+    fn do_rotate(&self, p: RotateParams) -> Result<String> {
+        let mut a = self.access(true)?;
+        a.require(Permission::Rotate)?;
+        a.require_env(Some(&p.env))?;
+        let fr = a.field(&p.reference)?;
+        let name = fr.text(&mut a.ws);
+        let slot = rotation::slot_key(&mut a.ws, &fr, Some(&p.env))?;
+        if slot == crate::model::SHARED && !a.token.envs.is_empty() {
+            bail!(
+                "{name} has one value shared by every environment, and this token is limited to {}. The human can rotate it with `cemi rotate {name}`",
+                a.token.envs.join(", ")
+            );
+        }
+        let dests = rotation::affected(&mut a.ws, &fr, &slot)?;
+        let opts = RotateOptions {
+            new_value: if p.generate {
+                NewValue::Generate {
+                    length: 40,
+                    charset: crate::cli::Charset::Alnum,
+                }
+            } else {
+                NewValue::Origin
+            },
+            leaked: p.leaked,
+            keep_old: false,
+        };
+        let plan = rotation::describe_plan(&mut a.ws, &fr, Some(&p.env), &opts)?;
+        if !rotation::needs_approval(&mut a.ws, Some(&slot), &dests).is_empty() {
+            let id = a.request(ApprovalAction::Rotate {
+                reference: name.clone(),
+                env: p.env.clone(),
+                leaked: p.leaked,
+                generate: p.generate,
+            })?;
+            return Ok(format!(
+                "This touches a protected environment, so it needs a person. Ask the human to run `cemi approve {id}` in a terminal (the request expires in 1 hour). Plan:\n{}",
+                plan.join("\n")
+            ));
+        }
+        let actor = format!("mcp:{}", a.token.name);
+        let mut quiet = |_: &str| {};
+        let report = rotation::rotate(&mut a.ws, &fr, Some(&p.env), opts, &actor, &mut quiet)?;
+        Ok(report.lines.join("\n"))
     }
 
     fn do_run(&self, p: RunParams) -> Result<String> {
@@ -487,6 +680,27 @@ impl CemiServer {
     fn run(&self, Parameters(p): Parameters<RunParams>) -> CallToolResult {
         self.do_run(p).map(text).unwrap_or_else(failure)
     }
+
+    #[tool(
+        description = "Check where secrets are copied (GitHub, Supabase, .env files…): up to date, out of date, changed outside Cemí, or missing. Never shows values."
+    )]
+    fn check(&self, Parameters(p): Parameters<CheckParams>) -> CallToolResult {
+        self.do_check(p).map(text).unwrap_or_else(failure)
+    }
+
+    #[tool(
+        description = "Send the current value of a secret to its destinations that do not have it. In protected environments (like prod) this creates a request that the human approves with `cemi approve`."
+    )]
+    fn push(&self, Parameters(p): Parameters<PushParams>) -> CallToolResult {
+        self.do_push(p).map(text).unwrap_or_else(failure)
+    }
+
+    #[tool(
+        description = "Replace a secret: create a new one at its origin, send it to every destination, verify it, and revoke the old one. Undone automatically if something fails. Use leaked=true when the old key leaked. In protected environments this creates a request that the human approves with `cemi approve`. You never see the new value."
+    )]
+    fn rotate(&self, Parameters(p): Parameters<RotateParams>) -> CallToolResult {
+        self.do_rotate(p).map(text).unwrap_or_else(failure)
+    }
 }
 
 #[tool_handler(router = self.tool_router)]
@@ -494,9 +708,11 @@ impl ServerHandler for CemiServer {
     fn get_info(&self) -> ServerConfig {
         ServerConfig::new(ServerCapabilities::builder().enable_tools().build()).with_instructions(
             "Cemí keeps the user's API keys and secrets. You can see names, notes and status, \
-             generate new secrets and run allowed project commands with secrets injected, but you \
-             never receive secret values. Never ask the user to paste a secret into the chat: tell \
-             them to run `cemi set <record>#<field>` in their terminal instead.",
+             generate new secrets, run allowed project commands with secrets injected, check and \
+             update the places where secrets are copied, and rotate leaked keys, but you never \
+             receive secret values. Changes in protected environments wait for the human to run \
+             `cemi approve <id>`. Never ask the user to paste a secret into the chat: tell them to \
+             run `cemi set <record>#<field>` in their terminal instead.",
         )
     }
 }

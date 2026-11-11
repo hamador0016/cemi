@@ -178,12 +178,8 @@ pub fn ensure_field<'a>(rec: &'a mut Record, r: &Ref, create: bool) -> Result<&'
             );
         }
         validate_name(&fname, "field")?;
-        rec.fields.push(Field {
-            name: fname.clone(),
-            kind: FieldKind::Text,
-            secret: true,
-            values: Default::default(),
-        });
+        rec.fields
+            .push(Field::new(fname.clone(), FieldKind::Text, true));
     }
     Ok(rec.field_mut(&fname).expect("just ensured"))
 }
@@ -241,35 +237,17 @@ pub fn generate_value(
 
 /// A record described without any secret value (for `show` in the MCP server).
 pub fn record_summary(v: &Vault, rec: &Record) -> String {
-    let mut out = format!(
-        "{}
-",
-        v.record_path(rec)
-    );
+    use std::fmt::Write;
+    let mut out = String::new();
+    let _ = writeln!(out, "{}", v.record_path(rec));
     for (k, val) in &rec.memory {
-        out.push_str(&format!(
-            "{k}: {val}
-"
-        ));
+        let _ = writeln!(out, "{k}: {val}");
     }
-    out.push_str(
-        "fields:
-",
-    );
+    out.push_str("fields:\n");
     for f in &rec.fields {
-        out.push_str(&format!(
-            "- {} ({}{})
-",
-            f.name,
-            f.kind,
-            if f.secret { ", secret" } else { "" }
-        ));
+        let secret = if f.secret { ", secret" } else { "" };
+        let _ = writeln!(out, "- {} ({}{secret})", f.name, f.kind);
         for (env, slot) in &f.values {
-            let label = if env == SHARED {
-                "all environments"
-            } else {
-                env.as_str()
-            };
             let state = if let Some(ext) = &slot.external {
                 format!("not stored in Cemí, lives in: {ext}")
             } else {
@@ -282,19 +260,44 @@ pub fn record_summary(v: &Vault, rec: &Record) -> String {
                     Some(Value::File { name, .. }) => format!("file {name}"),
                 }
             };
-            out.push_str(&format!(
-                "    {label}: {state}
-"
-            ));
+            let _ = writeln!(out, "    {}: {state}", env_name(env));
+        }
+        for (env, o) in &f.origins {
+            let _ = writeln!(
+                out,
+                "    new values ({}): {}",
+                env_name(env),
+                o.spec.describe()
+            );
+        }
+        for d in &f.destinations {
+            let sent = match &d.last {
+                Some(l) => format!("last sent {}", crate::ui::when(l.at, "%Y-%m-%d %H:%M")),
+                None => "never sent".to_string(),
+            };
+            let _ = writeln!(
+                out,
+                "    copied to ({}): {} [{}, {sent}]",
+                env_name(&d.env),
+                d.spec.describe(),
+                d.id
+            );
+        }
+        for (env, cmd) in &f.verify {
+            let _ = writeln!(out, "    checked by ({}): {}", env_name(env), cmd.join(" "));
         }
     }
     let envs = v.effective_envs(&rec.entity);
     if !envs.is_empty() {
-        out.push_str(&format!(
-            "environments: {}
-",
-            envs.join(", ")
-        ));
+        let _ = writeln!(out, "environments: {}", envs.join(", "));
     }
     out
+}
+
+fn env_name(env: &str) -> &str {
+    if env == SHARED {
+        "all environments"
+    } else {
+        env
+    }
 }

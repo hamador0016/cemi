@@ -120,6 +120,13 @@ pub fn confirm(question: &str) -> bool {
     )
 }
 
+/// A moment in this computer's time zone, for people.
+pub fn when(at: jiff::Timestamp, format: &str) -> String {
+    at.to_zoned(jiff::tz::TimeZone::system())
+        .strftime(format)
+        .to_string()
+}
+
 pub fn ok(msg: impl AsRef<str>) {
     eprintln!("✓ {}", msg.as_ref());
 }

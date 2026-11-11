@@ -103,9 +103,22 @@ fn resolve_depth(ws: &mut Workspace, r: &Ref, env: Option<&str>, depth: usize) -
     })
 }
 
+/// The `{{…}}` parts of a template, trimmed.
+pub fn template_refs(text: &str) -> Vec<String> {
+    let mut out = Vec::new();
+    let mut rest = text;
+    while let Some(s) = rest.find("{{") {
+        let after = &rest[s + 2..];
+        let Some(e) = after.find("}}") else { break };
+        out.push(after[..e].trim().to_string());
+        rest = &after[e + 2..];
+    }
+    out
+}
+
 /// Template parts are relative to the template's own entity, unless they
 /// start with `/` (absolute in the same vault) or `global:`/`local:`.
-fn template_ref(text: &str, scope: Scope, entity_path: &[String]) -> Result<Ref> {
+pub fn template_ref(text: &str, scope: Scope, entity_path: &[String]) -> Result<Ref> {
     if let Some(abs) = text.strip_prefix('/') {
         let mut r = Ref::parse(abs)?;
         r.vault = sel_for(scope);

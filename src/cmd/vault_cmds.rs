@@ -367,7 +367,7 @@ pub fn log(ctx: &mut Ctx, limit: usize, verify: bool) -> Result<i32> {
     for e in &read.entries[start..] {
         let mut line = format!(
             "{}  {:<14} {:<18}",
-            e.at.strftime("%Y-%m-%d %H:%M:%S"),
+            ui::when(e.at, "%Y-%m-%d %H:%M:%S"),
             e.actor,
             e.action
         );

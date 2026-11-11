@@ -3,12 +3,13 @@
 mod mcp_cmds;
 mod memory;
 mod project_cmds;
+mod rotation_cmds;
 mod scan_cmds;
 mod structure;
 mod values;
 mod vault_cmds;
 
-use anyhow::{Result, anyhow};
+use anyhow::{Result, anyhow, bail};
 
 use crate::audit::{self, Event};
 use crate::cli::{Cli, Cmd};
@@ -16,7 +17,7 @@ use crate::model::Record;
 use crate::project::Project;
 use crate::refs::{self, Ref, VaultSel};
 use crate::ui;
-use crate::vault::{Scope, Vault};
+use crate::vault::{Header, Scope, Vault};
 use crate::workspace::{self, Workspace};
 
 pub struct Ctx {
@@ -126,6 +127,23 @@ impl Ctx {
     }
 }
 
+/// Asks for the master password again: before showing a secret, or changing
+/// a protected environment. A person has to type it; AI clients cannot.
+pub(crate) fn reauthenticate(ctx: &Ctx, scope: Scope, why: &str) -> Result<()> {
+    let dir = ctx.ws.dir(scope)?;
+    let header = Header::read(&dir)?;
+    let (header, label) = if header.password.is_some() {
+        (header, scope.to_string())
+    } else {
+        (Header::read(&ctx.ws.global_dir)?, "global".to_string())
+    };
+    let pw = ui::password(&format!("{why}: password for the {label} vault: "))?;
+    if header.unlock_with_password(&pw)?.is_none() {
+        bail!("wrong password");
+    }
+    Ok(())
+}
+
 /// Commands that change a vault take its lock for writing.
 fn writes(cmd: &Cmd) -> bool {
     use crate::cli::*;
@@ -147,6 +165,8 @@ fn writes(cmd: &Cmd) -> bool {
         | Cmd::Unlock
         | Cmd::Lock => false,
         Cmd::Env(EnvCmd::Ls { .. } | EnvCmd::Diff { .. }) => false,
+        Cmd::Dest(DestCmd::Ls { .. }) | Cmd::Check { .. } => false,
+        Cmd::Incident { rotate, .. } => *rotate,
         Cmd::Task(TaskCmd::Ls) => false,
         Cmd::Token(TokenCmd::Ls) => false,
         Cmd::Mcp(
@@ -251,6 +271,67 @@ pub fn run(cli: Cli) -> Result<i32> {
             &plain,
             no_link,
         ),
+        C::Origin(c) => rotation_cmds::origin(&mut ctx, c),
+        C::Dest(c) => rotation_cmds::dest(&mut ctx, c),
+        C::Verify {
+            reference,
+            env,
+            clear,
+            command,
+        } => rotation_cmds::verify(&mut ctx, &reference, env.as_deref(), clear, command),
+        C::Push {
+            reference,
+            env,
+            force,
+        } => rotation_cmds::push(&mut ctx, reference.as_deref(), env.as_deref(), force),
+        C::Check {
+            reference,
+            env,
+            offline,
+        } => rotation_cmds::check(&mut ctx, reference.as_deref(), env.as_deref(), offline),
+        C::Rotate {
+            reference,
+            env,
+            leaked,
+            generate,
+            paste,
+            length,
+            charset,
+            keep_old,
+            yes,
+        } => rotation_cmds::rotate(
+            &mut ctx,
+            &reference,
+            env.as_deref(),
+            leaked,
+            generate,
+            paste,
+            length,
+            charset,
+            keep_old,
+            yes,
+        ),
+        C::Revoke {
+            reference,
+            env,
+            number,
+            pending,
+            leaked,
+        } => rotation_cmds::revoke(
+            &mut ctx,
+            &reference,
+            env.as_deref(),
+            number,
+            pending,
+            leaked,
+        ),
+        C::Incident {
+            references,
+            env,
+            rotate,
+            yes,
+        } => rotation_cmds::incident(&mut ctx, &references, env.as_deref(), rotate, yes),
+        C::Approve { id, deny } => rotation_cmds::approve(&mut ctx, id.as_deref(), deny),
         C::Token(c) => mcp_cmds::token(&mut ctx, c),
         C::Mcp(c) => mcp_cmds::mcp(ctx, c),
         C::Log { limit, verify } => vault_cmds::log(&mut ctx, limit, verify),

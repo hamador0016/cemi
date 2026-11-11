@@ -172,7 +172,7 @@ fn describe(t: &Token) -> String {
             t.envs.join(", ")
         },
         t.expires
-            .map(|e| e.strftime("%Y-%m-%d %H:%M").to_string())
+            .map(|e| ui::when(e, "%Y-%m-%d %H:%M"))
             .unwrap_or_else(|| "never".into())
     )
 }

@@ -11,7 +11,7 @@ Bóvedas, estructura libre, ambientes, memoria, `status`, `run`, `cemi.toml`,
 `import`/`export`, servidor MCP con tokens limitados, `mcp launch`, auditoría, `scan` y el
 pre-commit.
 
-## v0.2 — Rotación (en curso)
+## v0.2 — Rotación (lista)
 
 - **Orígenes y destinos.** Cemí sabe dónde nace cada llave y cada lugar donde se copia, por
   ambiente.
@@ -23,7 +23,7 @@ pre-commit.
 - `cemi push`, `cemi check`, `cemi rotate` (plan → aprobar → crear → propagar → verificar →
   confirmar → revocar, con vuelta atrás automática) y `cemi incident` para llaves filtradas.
 - **Aprobación** que una IA no puede dar: los cambios en producción piden la contraseña de la
-  bóveda escrita por una persona.
+  bóveda escrita por una persona; lo que pida una IA espera a `cemi approve`.
 - Herramientas MCP `check`, `push` y `rotate`: la IA recibe planes y resultados, nunca valores.
 
 *Lista cuando:* una llave filtrada se reemplaza en todos los lugares donde se usa con un

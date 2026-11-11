@@ -10,9 +10,14 @@ use crate::model::{FieldKind, SHARED, Value};
 use crate::refs::Ref;
 use crate::resolve;
 use crate::ui;
-use crate::vault::{Header, Scope};
+use crate::vault::Scope;
 
-fn check_env(ctx: &mut Ctx, scope: Scope, record_id: &str, env: Option<&str>) -> Result<()> {
+pub(super) fn check_env(
+    ctx: &mut Ctx,
+    scope: Scope,
+    record_id: &str,
+    env: Option<&str>,
+) -> Result<()> {
     let Some(env) = env else { return Ok(()) };
     let v = ctx.ws.open(scope)?;
     let entity = v.records[record_id].entity.clone();
@@ -263,24 +268,6 @@ pub fn clipboard_helper(seconds: u64) -> Result<i32> {
     Ok(0)
 }
 
-/// Asks for the master password again before showing a value on screen.
-fn reauthenticate(ctx: &Ctx, scope: Scope) -> Result<()> {
-    let dir = ctx.ws.dir(scope)?;
-    let header = Header::read(&dir)?;
-    let (header, label) = if header.password.is_some() {
-        (header, scope.to_string())
-    } else {
-        (Header::read(&ctx.ws.global_dir)?, "global".to_string())
-    };
-    let pw = ui::password(&format!(
-        "Showing a secret: password for the {label} vault: "
-    ))?;
-    if header.unlock_with_password(&pw)?.is_none() {
-        bail!("wrong password");
-    }
-    Ok(())
-}
-
 pub fn reveal(ctx: &mut Ctx, reference: &str, env: Option<&str>) -> Result<i32> {
     let r = ctx.parse_ref(reference)?;
     r.require_field()?;
@@ -291,7 +278,7 @@ pub fn reveal(ctx: &mut Ctx, reference: &str, env: Option<&str>) -> Result<i32> 
             .is_some_and(|f| f.secret || f.kind == FieldKind::Template)
     };
     if is_secret {
-        reauthenticate(ctx, scope)?;
+        super::reauthenticate(ctx, scope, "Showing a secret")?;
     }
     let (_, val) = resolve_for_human(ctx, &r, env)?;
     ctx.audit(scope, "value.reveal", Some(r.to_string()), env);
@@ -332,7 +319,7 @@ pub fn history(ctx: &mut Ctx, reference: &str, env: Option<&str>) -> Result<i32>
             "  v{}  {:<9} {}  by {}{}",
             i + 1,
             ver.state.to_string(),
-            ver.at.strftime("%Y-%m-%d %H:%M"),
+            ui::when(ver.at, "%Y-%m-%d %H:%M"),
             ver.actor,
             ver.note
                 .as_ref()

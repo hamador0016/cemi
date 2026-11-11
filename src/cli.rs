@@ -102,6 +102,7 @@ pub enum Cmd {
     /// Generate a random value and store it without showing it
     Generate {
         reference: String,
+        /// Environment, like dev or prod (default: the value shared by all)
         #[arg(short, long)]
         env: Option<String>,
         #[arg(long, default_value_t = 40)]
@@ -114,18 +115,21 @@ pub enum Cmd {
     /// Copy a value to the clipboard for 30 seconds (kept out of clipboard history)
     Copy {
         reference: String,
+        /// Environment, like dev or prod (default: the value shared by all)
         #[arg(short, long)]
         env: Option<String>,
     },
     /// Print a value. Asks for the master password again.
     Reveal {
         reference: String,
+        /// Environment, like dev or prod (default: the value shared by all)
         #[arg(short, long)]
         env: Option<String>,
     },
     /// Versions of a value (dates and notes, never the values)
     History {
         reference: String,
+        /// Environment, like dev or prod (default: the value shared by all)
         #[arg(short, long)]
         env: Option<String>,
     },
@@ -135,6 +139,7 @@ pub enum Cmd {
         /// Version number from `cemi history` (1, 2, …)
         #[arg(value_name = "VERSION")]
         number: usize,
+        /// Environment, like dev or prod (default: the value shared by all)
         #[arg(short, long)]
         env: Option<String>,
     },
@@ -184,6 +189,7 @@ pub enum Cmd {
         /// Entity to put the records in
         #[arg(long)]
         into: Option<String>,
+        /// Environment, like dev or prod (default: the value shared by all)
         #[arg(short, long)]
         env: Option<String>,
         /// Variables that are not secret, comma separated
@@ -192,6 +198,120 @@ pub enum Cmd {
         /// Do not add the variables to cemi.toml
         #[arg(long)]
         no_link: bool,
+    },
+
+    /// Where a key is created, per environment (used by `cemi rotate`)
+    #[command(subcommand)]
+    Origin(OriginCmd),
+    /// Places a value is copied to: GitHub, Supabase, .env files, commands…
+    #[command(subcommand)]
+    Dest(DestCmd),
+    /// Set a command that checks a value works (it gets the value on stdin)
+    Verify {
+        /// record#field
+        reference: String,
+        /// Environment, like dev or prod (default: the value shared by all)
+        #[arg(short, long)]
+        env: Option<String>,
+        /// Remove the check
+        #[arg(long, conflicts_with = "command")]
+        clear: bool,
+        #[arg(
+            trailing_var_arg = true,
+            value_name = "COMMAND",
+            required_unless_present = "clear"
+        )]
+        command: Vec<String>,
+    },
+    /// Send current values to the destinations that do not have them yet
+    Push {
+        /// record#field (default: every field with destinations)
+        reference: Option<String>,
+        /// Only the destinations of this environment
+        #[arg(short, long)]
+        env: Option<String>,
+        /// Send even when the destination already has the value
+        #[arg(long)]
+        force: bool,
+    },
+    /// Compare destinations with the vault: out of date, changed outside Cemí, missing
+    Check {
+        reference: Option<String>,
+        /// Environment, like dev or prod (default: the value shared by all)
+        #[arg(short, long)]
+        env: Option<String>,
+        /// Do not contact providers; compare with what Cemí last sent
+        #[arg(long)]
+        offline: bool,
+    },
+    /// Replace a key everywhere: create it, send it, verify it, revoke the old one
+    Rotate {
+        /// record#field
+        reference: String,
+        /// Environment, like dev or prod (default: the value shared by all)
+        #[arg(short, long)]
+        env: Option<String>,
+        /// The old key leaked: revoke it as soon as the new one works
+        #[arg(long)]
+        leaked: bool,
+        /// Let Cemí make the new value (for services that accept any value)
+        #[arg(long, conflicts_with = "paste")]
+        generate: bool,
+        /// Type the new value (when the provider has no API)
+        #[arg(long)]
+        paste: bool,
+        #[arg(long, default_value_t = 40, requires = "generate")]
+        length: usize,
+        #[arg(long, value_enum, default_value_t = Charset::Alnum, requires = "generate")]
+        charset: Charset,
+        /// Keep the old key valid (revoke it later with `cemi revoke`)
+        #[arg(long, conflicts_with = "leaked")]
+        keep_old: bool,
+        /// Do not ask "go ahead?" (protected environments still ask for the password)
+        #[arg(short, long)]
+        yes: bool,
+    },
+    /// Revoke an old version of a key at its origin
+    Revoke {
+        reference: String,
+        /// Environment, like dev or prod (default: the value shared by all)
+        #[arg(short, long)]
+        env: Option<String>,
+        /// Version number from `cemi history`
+        #[arg(
+            value_name = "VERSION",
+            conflicts_with = "pending",
+            required_unless_present = "pending"
+        )]
+        number: Option<usize>,
+        /// The value left pending by a rotation that did not finish
+        #[arg(long)]
+        pending: bool,
+        /// Report the key as leaked to the provider
+        #[arg(long)]
+        leaked: bool,
+    },
+    /// A key leaked: what it reaches, who used it, and how to replace it
+    Incident {
+        /// record#field (one or more)
+        #[arg(required = true)]
+        references: Vec<String>,
+        /// Environment, like dev or prod (default: the value shared by all)
+        #[arg(short, long)]
+        env: Option<String>,
+        /// Rotate them now (as leaked)
+        #[arg(long)]
+        rotate: bool,
+        #[arg(short, long)]
+        yes: bool,
+    },
+    /// Changes that an AI client asked for in protected environments
+    Approve {
+        /// Request id (without it: list the requests)
+        id: Option<String>,
+        /// Refuse the request
+        #[arg(long, requires = "id")]
+        deny: bool,
     },
 
     /// Access tokens for AI clients
@@ -351,6 +471,141 @@ pub enum EnvCmd {
         b: String,
         #[arg(long)]
         at: Option<String>,
+    },
+    /// Changes in this environment need the password (AI clients need `cemi approve`)
+    Protect { name: String },
+    /// Stop protecting an environment (asks for the password)
+    Unprotect { name: String },
+}
+
+#[derive(Subcommand)]
+pub enum OriginCmd {
+    /// cemi origin set acme/shop/supabase#key -e prod supabase-key --project abcd --token global:accounts/supabase#token
+    Set {
+        /// record#field
+        reference: String,
+        /// Environment, like dev or prod (default: the value shared by all)
+        #[arg(short, long)]
+        env: Option<String>,
+        #[command(subcommand)]
+        kind: OriginKind,
+    },
+    /// Forget the origin
+    Rm {
+        reference: String,
+        /// Environment, like dev or prod (default: the value shared by all)
+        #[arg(short, long)]
+        env: Option<String>,
+    },
+}
+
+#[derive(Subcommand)]
+pub enum OriginKind {
+    /// A Supabase secret API key (sb_secret_…), created and deleted through the Management API
+    SupabaseKey {
+        /// Project ref (the id in your project URL)
+        #[arg(long)]
+        project: String,
+        /// record#field with a Supabase access token
+        #[arg(long)]
+        token: String,
+        /// Base name for the keys; Cemí adds the date
+        #[arg(long, default_value = "cemi")]
+        name: String,
+        #[arg(long, hide = true)]
+        api_url: Option<String>,
+    },
+    /// Your program: `COMMAND create` prints a new value, `COMMAND revoke` gets the old one on stdin
+    Command {
+        #[arg(trailing_var_arg = true, required = true, value_name = "COMMAND")]
+        command: Vec<String>,
+    },
+    /// A program called cemi-connector-NAME (see docs/connectors.md)
+    External {
+        name: String,
+        /// Option for the connector
+        #[arg(long = "set", value_name = "KEY=VALUE")]
+        set: Vec<String>,
+        /// Secret option, given as a reference: --secret token=global:accounts/x#token
+        #[arg(long = "secret", value_name = "KEY=REF")]
+        secret: Vec<String>,
+    },
+}
+
+#[derive(Subcommand)]
+pub enum DestCmd {
+    /// cemi dest add acme/shop/stripe#key -e prod github --repo acme/shop --name STRIPE_KEY
+    Add {
+        /// record#field
+        reference: String,
+        /// Environment whose value goes there (default: the value shared by all)
+        #[arg(short, long)]
+        env: Option<String>,
+        #[command(subcommand)]
+        kind: DestKind,
+    },
+    /// Destinations of one field, or of all
+    Ls { reference: Option<String> },
+    /// Forget a destination (nothing is deleted there)
+    Rm {
+        reference: String,
+        /// Id from `cemi dest ls`
+        id: String,
+    },
+}
+
+#[derive(Subcommand)]
+pub enum DestKind {
+    /// A GitHub Actions secret (of the repository, or of one of its environments)
+    Github {
+        /// owner/name
+        #[arg(long)]
+        repo: String,
+        /// Secret name
+        #[arg(long)]
+        name: String,
+        /// GitHub environment (default: a repository secret)
+        #[arg(long)]
+        environment: Option<String>,
+        /// record#field with a GitHub token (default: the GitHub CLI's login)
+        #[arg(long)]
+        token: Option<String>,
+        /// For GitHub Enterprise Server: https://HOST/api/v3
+        #[arg(long)]
+        api_url: Option<String>,
+    },
+    /// A Supabase Edge Function secret
+    SupabaseSecret {
+        #[arg(long)]
+        project: String,
+        #[arg(long)]
+        name: String,
+        /// record#field with a Supabase access token
+        #[arg(long)]
+        token: String,
+        #[arg(long, hide = true)]
+        api_url: Option<String>,
+    },
+    /// A variable in a .env file on this computer
+    Dotenv {
+        #[arg(long, default_value = ".env")]
+        file: std::path::PathBuf,
+        /// Variable name
+        #[arg(long)]
+        key: String,
+    },
+    /// A program that receives the value on stdin: -- gh secret set NAME
+    Command {
+        #[arg(trailing_var_arg = true, required = true, value_name = "COMMAND")]
+        command: Vec<String>,
+    },
+    /// A program called cemi-connector-NAME (see docs/connectors.md)
+    External {
+        name: String,
+        #[arg(long = "set", value_name = "KEY=VALUE")]
+        set: Vec<String>,
+        #[arg(long = "secret", value_name = "KEY=REF")]
+        secret: Vec<String>,
     },
 }
 

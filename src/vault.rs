@@ -3,7 +3,7 @@
 //! ```text
 //! .cemi/
 //!   vault.json        header: id, KDF parameters, the wrapped vault key
-//!   objects/<id>.age  entities, records, tokens and launchers (names included)
+//!   objects/<id>.age  entities, records, tokens, launchers and approvals (names included)
 //!   audit.log         one age-encrypted entry per line
 //!   lock              taken while reading or writing
 //!   .gitignore        "*", so git never picks the folder up
@@ -26,7 +26,8 @@ use zeroize::Zeroizing;
 
 use crate::crypto::{self, AgeKey, KdfParams, Sealed};
 use crate::model::{
-    Entity, Envelope, Launcher, OBJECT_FORMAT, Object, Record, Sensitive, Token, validate_name,
+    Approval, DEFAULT_PROTECTED, Entity, Envelope, Launcher, OBJECT_FORMAT, Object, Record,
+    Sensitive, Token, validate_name,
 };
 
 pub const HEADER_FILE: &str = "vault.json";
@@ -222,6 +223,7 @@ pub struct Vault {
     pub records: BTreeMap<String, Record>,
     pub tokens: BTreeMap<String, Token>,
     pub launchers: BTreeMap<String, Launcher>,
+    pub approvals: BTreeMap<String, Approval>,
     /// Objects that could not be opened (corrupt, or encrypted to an unknown key).
     pub unreadable: Vec<String>,
     dirty: BTreeSet<String>,
@@ -295,6 +297,7 @@ impl Vault {
             envs: default_envs.iter().map(|s| s.to_string()).collect(),
             memory: BTreeMap::new(),
             tasks: Vec::new(),
+            protected: None,
             created: now,
             updated: now,
         };
@@ -306,6 +309,7 @@ impl Vault {
             records: BTreeMap::new(),
             tokens: BTreeMap::new(),
             launchers: BTreeMap::new(),
+            approvals: BTreeMap::new(),
             unreadable: Vec::new(),
             dirty: BTreeSet::new(),
             deleted: BTreeSet::new(),
@@ -355,6 +359,7 @@ impl Vault {
             records: BTreeMap::new(),
             tokens: BTreeMap::new(),
             launchers: BTreeMap::new(),
+            approvals: BTreeMap::new(),
             unreadable: Vec::new(),
             dirty: BTreeSet::new(),
             deleted: BTreeSet::new(),
@@ -399,6 +404,9 @@ impl Vault {
                             }
                             Object::Launcher(l) => {
                                 vault.launchers.insert(id, l);
+                            }
+                            Object::Approval(a) => {
+                                vault.approvals.insert(id, a);
                             }
                         }
                     }
@@ -484,6 +492,9 @@ impl Vault {
         }
         if let Some(l) = self.launchers.get(id) {
             return Ok((Object::Launcher(l.clone()), vault_recipient));
+        }
+        if let Some(a) = self.approvals.get(id) {
+            return Ok((Object::Approval(a.clone()), vault_recipient));
         }
         bail!("internal error: object {id} not found")
     }
@@ -584,6 +595,7 @@ impl Vault {
                         envs: Vec::new(),
                         memory: BTreeMap::new(),
                         tasks: Vec::new(),
+                        protected: None,
                         created: now,
                         updated: now,
                     };
@@ -746,6 +758,31 @@ impl Vault {
         self.dirty.remove(id);
         self.deleted.insert(id.to_string());
     }
+
+    // ----- approvals and protected environments -----
+
+    pub fn put_approval(&mut self, a: Approval) {
+        self.dirty.insert(a.id.clone());
+        self.approvals.insert(a.id.clone(), a);
+    }
+
+    pub fn delete_approval(&mut self, id: &str) {
+        self.approvals.remove(id);
+        self.dirty.remove(id);
+        self.deleted.insert(id.to_string());
+    }
+
+    /// Environments whose changes need a person's approval.
+    pub fn protected_envs(&self) -> Vec<String> {
+        match &self.root().protected {
+            Some(list) => list.clone(),
+            None => DEFAULT_PROTECTED.iter().map(|s| s.to_string()).collect(),
+        }
+    }
+
+    pub fn is_protected(&self, env: &str) -> bool {
+        self.protected_envs().iter().any(|e| e == env)
+    }
 }
 
 pub fn display_path(path: &[String]) -> String {
@@ -793,12 +830,7 @@ mod tests {
         let ent = v.ensure_entity(&["acme".into(), "shop".into()]).unwrap();
         let rid = v.add_record(&ent, "stripe").unwrap();
         let r = v.record_mut(&rid);
-        let mut f = Field {
-            name: "secret".into(),
-            kind: FieldKind::Text,
-            secret: true,
-            values: Default::default(),
-        };
+        let mut f = Field::new("secret", FieldKind::Text, true);
         f.values
             .entry(SHARED.into())
             .or_default()

@@ -11,7 +11,7 @@ valores.
 
 *El nombre viene del cemí taíno, una figura tallada que protegía lo que su dueño valoraba.*
 
-> **Estado: v0.1, temprana.** El formato y los comandos todavía pueden cambiar. Lee
+> **Estado: v0.2, temprana.** El formato y los comandos todavía pueden cambiar. Lee
 > [docs/threat-model.md](docs/threat-model.md) antes de confiarle secretos de producción.
 
 ## Por qué
@@ -100,6 +100,34 @@ de credenciales previsto para la v0.4 lo cierra para las API HTTP, porque el com
 recibe la llave. Mientras tanto, no dejes que una IA corra comandos con secretos de
 producción. Detalles en [docs/threat-model.md](docs/threat-model.md).
 
+## Rotar una llave en todos lados
+
+Le dices a Cemí, una vez, dónde nace cada llave y adónde se copia:
+
+```bash
+cemi origin set tienda/supabase#key -e prod supabase-key --project abcdefghijklmnopqrst --token global:cuentas/supabase#token
+cemi dest add tienda/supabase#key -e prod github --repo acme/tienda --name SUPABASE_KEY --environment production
+cemi dest add tienda/supabase#key -e prod dotenv --file .env.production --key SUPABASE_KEY
+cemi verify tienda/supabase#key -e prod -- npm run check:supabase
+```
+
+Desde ahí:
+
+```bash
+cemi check                                     # desactualizados, cambiados por fuera, faltantes
+cemi push                                      # envía los valores actuales donde falten
+cemi rotate tienda/supabase#key -e prod        # llave nueva → cada destino → verificar → revocar la vieja
+cemi incident tienda/supabase#key -e prod      # se filtró: dónde está, quién la usó; --rotate la reemplaza
+```
+
+Si un destino o la verificación falla, la llave vieja vuelve a todos lados. Incluidos: secretos
+de GitHub Actions, llaves de API y secretos de funciones de Supabase, archivos `.env` y
+cualquier comando; cualquiera puede agregar un proveedor con un programa pequeño. Ver
+[docs/connectors.md](docs/connectors.md).
+
+`prod` está protegido: los cambios ahí piden tu contraseña, y si una IA los pide por MCP solo
+crea una solicitud que tú apruebas con `cemi approve`.
+
 ## Nunca subir un secreto
 
 ```bash
@@ -115,7 +143,8 @@ cemi scan --history      # busca tus valores en todo el historial de git
 | Estructura | `ls`, `add`, `mv`, `rm`, `field add/rm/edit`, `find`, `show` |
 | Valores | `set`, `generate`, `copy`, `reveal`, `history`, `revert` |
 | Memoria | `note`, `task`, `deps`, `doc` |
-| Ambientes | `env ls/add/rm/diff` |
+| Ambientes | `env ls/add/rm/diff/protect/unprotect` |
+| Rotación | `origin set/rm`, `dest add/ls/rm`, `verify`, `push`, `check`, `rotate`, `revoke`, `incident`, `approve` |
 | Proyecto | `link`, `var add/rm/ls`, `run`, `export`, `import` |
 | IA | `token create/ls/revoke`, `mcp serve/setup/add/launch/ls/rm` |
 | Git | `scan`, `hook install` |
@@ -124,9 +153,7 @@ Las referencias tienen la forma `[global:|local:]entidad/registro#campo`.
 
 ## Próximas versiones
 
-- **v0.2**: rotación. Cemí sabe dónde nace cada llave y adónde se copia (secretos de GitHub,
-  Supabase, archivos `.env`…), así `cemi rotate` crea una llave nueva, actualiza cada destino,
-  verifica y revoca la vieja, con tu aprobación.
+- **v0.2** (esta versión): rotación, con orígenes, destinos y aprobaciones.
 - **v0.3**: uso diario: encontrar los `.env` que ya tienes, autocompletado, tipos para tu código,
   secretos en CI.
 - **v0.4**: app de escritorio y proxy de credenciales (la IA llama a las API sin recibir la

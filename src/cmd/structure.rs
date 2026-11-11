@@ -144,12 +144,7 @@ pub fn field(ctx: &mut Ctx, cmd: FieldCmd) -> Result<i32> {
             if rec.field(&name).is_some() {
                 bail!("{} already has a field {name:?}", r.record_path());
             }
-            rec.fields.push(Field {
-                name: name.clone(),
-                kind,
-                secret,
-                values: Default::default(),
-            });
+            rec.fields.push(Field::new(name.clone(), kind, secret));
             v.save()?;
             ctx.audit(
                 scope,
@@ -278,7 +273,7 @@ fn describe_value(f: &Field, env_key: &str) -> String {
     match slot.current_version() {
         None => "—".to_string(),
         Some(ver) => {
-            let when = ver.at.strftime("%Y-%m-%d");
+            let when = ui::when(ver.at, "%Y-%m-%d");
             let n = slot.versions.len();
             if f.secret {
                 format!("set ({when}, v{n})")
@@ -341,6 +336,31 @@ pub fn show(ctx: &mut Ctx, reference: &str) -> Result<i32> {
             let label = if k == SHARED { "all envs" } else { k.as_str() };
             println!("      {label}: {}", describe_value(f, k));
         }
+        let env_name = |e: &str| {
+            if e == SHARED {
+                "all envs".to_string()
+            } else {
+                e.to_string()
+            }
+        };
+        for (e, o) in &f.origins {
+            println!("      new values ({}): {}", env_name(e), o.spec.describe());
+        }
+        for d in &f.destinations {
+            let sent = match &d.last {
+                Some(l) => format!("last sent {}", ui::when(l.at, "%Y-%m-%d %H:%M")),
+                None => "never sent".to_string(),
+            };
+            println!(
+                "      copied to ({}): {}  [{}, {sent}]",
+                env_name(&d.env),
+                d.spec.describe(),
+                d.id
+            );
+        }
+        for (e, cmd) in &f.verify {
+            println!("      checked by ({}): {}", env_name(e), cmd.join(" "));
+        }
     }
     if !envs.is_empty() {
         println!();
@@ -357,10 +377,16 @@ pub fn env(ctx: &mut Ctx, cmd: EnvCmd) -> Result<i32> {
             let v = ctx.ws.open(scope)?;
             let id = v.find_entity_id(&path)?;
             for e in v.effective_envs(&id) {
-                println!("{e}");
+                if v.is_protected(&e) {
+                    println!("{e} (protected)");
+                } else {
+                    println!("{e}");
+                }
             }
             Ok(0)
         }
+        EnvCmd::Protect { name } => super::rotation_cmds::protect(ctx, &name, true),
+        EnvCmd::Unprotect { name } => super::rotation_cmds::protect(ctx, &name, false),
         EnvCmd::Add { name, at } => {
             validate_name(&name, "environment")?;
             if name == SHARED {

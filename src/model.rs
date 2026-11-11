@@ -9,6 +9,8 @@ use jiff::civil::Date;
 use serde::{Deserialize, Serialize};
 use zeroize::Zeroizing;
 
+use crate::connectors::{DestSpec, OriginSpec};
+
 /// Key used in `Field::values` for a value shared by every environment.
 pub const SHARED: &str = "*";
 
@@ -64,9 +66,16 @@ pub struct Entity {
     pub memory: BTreeMap<String, String>,
     #[serde(default)]
     pub tasks: Vec<Task>,
+    /// Only on the root entity: environments whose changes need a person's
+    /// approval. `None` means the default ([`DEFAULT_PROTECTED`]).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub protected: Option<Vec<String>>,
     pub created: Timestamp,
     pub updated: Timestamp,
 }
+
+/// Environments protected when a vault has not chosen its own.
+pub const DEFAULT_PROTECTED: &[&str] = &["prod", "production"];
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct Task {
@@ -164,9 +173,30 @@ pub struct Field {
     /// Environment name (or [`SHARED`]) to its value slot.
     #[serde(default)]
     pub values: BTreeMap<String, Slot>,
+    /// Where a new value is created, per slot (environment or [`SHARED`]).
+    #[serde(default, skip_serializing_if = "BTreeMap::is_empty")]
+    pub origins: BTreeMap<String, Origin>,
+    /// Every place the value is copied to.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub destinations: Vec<Destination>,
+    /// Command that checks a value works, per slot. Gets the value on stdin.
+    #[serde(default, skip_serializing_if = "BTreeMap::is_empty")]
+    pub verify: BTreeMap<String, Vec<String>>,
 }
 
 impl Field {
+    pub fn new(name: impl Into<String>, kind: FieldKind, secret: bool) -> Field {
+        Field {
+            name: name.into(),
+            kind,
+            secret,
+            values: BTreeMap::new(),
+            origins: BTreeMap::new(),
+            destinations: Vec::new(),
+            verify: BTreeMap::new(),
+        }
+    }
+
     /// The slot that applies to `env`: its own, or the shared one.
     pub fn slot_for(&self, env: Option<&str>) -> Option<(&str, &Slot)> {
         if let Some(env) = env
@@ -182,6 +212,45 @@ impl Field {
     pub fn current(&self, env: Option<&str>) -> Option<&Value> {
         self.slot_for(env).and_then(|(_, s)| s.current())
     }
+}
+
+/// Where new values of a slot are created (a provider, or a command).
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct Origin {
+    pub spec: OriginSpec,
+    pub created: Timestamp,
+}
+
+/// A place a value is copied to.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct Destination {
+    /// Short id, unique within the field.
+    pub id: String,
+    /// Environment whose value goes here, or [`SHARED`].
+    pub env: String,
+    pub spec: DestSpec,
+    /// The last successful delivery.
+    #[serde(default)]
+    pub last: Option<Delivery>,
+    pub created: Timestamp,
+}
+
+impl Destination {
+    /// The environment to resolve the value with.
+    pub fn env_opt(&self) -> Option<&str> {
+        (self.env != SHARED).then_some(self.env.as_str())
+    }
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct Delivery {
+    /// SHA-256 of the value that was sent.
+    pub fingerprint: String,
+    /// What the destination reported afterwards (a digest or an update time),
+    /// to notice changes made outside Cemí. Opaque.
+    #[serde(default)]
+    pub remote: Option<String>,
+    pub at: Timestamp,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, Default)]
@@ -212,11 +281,7 @@ impl Slot {
 
     /// Adds a new active version and archives the previous one (never deletes it).
     pub fn push(&mut self, value: Value, actor: &str, note: Option<String>) {
-        for v in self.versions.iter_mut() {
-            if v.state == VersionState::Active {
-                v.state = VersionState::Archived;
-            }
-        }
+        self.archive_active();
         self.external = None;
         self.versions.push(Version {
             value,
@@ -224,7 +289,36 @@ impl Slot {
             at: Timestamp::now(),
             actor: actor.to_string(),
             note,
+            provider_id: None,
         });
+    }
+
+    fn archive_active(&mut self) {
+        for v in self.versions.iter_mut() {
+            if v.state == VersionState::Active {
+                v.state = VersionState::Archived;
+            }
+        }
+    }
+
+    /// Index of the newest pending version (an unfinished rotation).
+    pub fn pending_index(&self) -> Option<usize> {
+        self.versions
+            .iter()
+            .rposition(|v| v.state == VersionState::Pending)
+    }
+
+    /// Index of the current active version.
+    pub fn active_index(&self) -> Option<usize> {
+        self.versions
+            .iter()
+            .rposition(|v| v.state == VersionState::Active)
+    }
+
+    /// Makes version `i` the active one; the previous active one is archived.
+    pub fn activate(&mut self, i: usize) {
+        self.archive_active();
+        self.versions[i].state = VersionState::Active;
     }
 }
 
@@ -236,6 +330,9 @@ pub struct Version {
     pub actor: String,
     #[serde(default)]
     pub note: Option<String>,
+    /// The provider's id for this key (to revoke it later).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub provider_id: Option<String>,
 }
 
 #[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq)]
@@ -323,6 +420,12 @@ pub enum Permission {
     Generate,
     /// Run allowlisted project commands with values injected.
     Run,
+    /// Send current values to their destinations (protected environments
+    /// still need a person's approval).
+    Push,
+    /// Replace a key: create, propagate, verify, revoke the old one
+    /// (protected environments still need a person's approval).
+    Rotate,
 }
 
 impl fmt::Display for Permission {
@@ -331,6 +434,8 @@ impl fmt::Display for Permission {
             Permission::Read => "read",
             Permission::Generate => "generate",
             Permission::Run => "run",
+            Permission::Push => "push",
+            Permission::Rotate => "rotate",
         })
     }
 }
@@ -347,6 +452,56 @@ pub struct Launcher {
     pub created: Timestamp,
 }
 
+/// A change an AI client asked for in a protected environment. Nothing
+/// happens until a person runs `cemi approve`.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct Approval {
+    pub id: String,
+    pub requested_by: String,
+    pub action: ApprovalAction,
+    pub created: Timestamp,
+    pub expires: Timestamp,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(tag = "kind", rename_all = "snake_case")]
+pub enum ApprovalAction {
+    Push {
+        /// `record#field`, with its vault prefix.
+        reference: String,
+        env: String,
+    },
+    Rotate {
+        reference: String,
+        env: String,
+        leaked: bool,
+        generate: bool,
+    },
+}
+
+impl fmt::Display for ApprovalAction {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        match self {
+            ApprovalAction::Push { reference, env } => write!(f, "push {reference} in {env}"),
+            ApprovalAction::Rotate {
+                reference,
+                env,
+                leaked,
+                generate,
+            } => {
+                write!(f, "rotate {reference} in {env}")?;
+                if *leaked {
+                    f.write_str(" (leaked: the old key is revoked at once)")?;
+                }
+                if *generate {
+                    f.write_str(" (new value generated by Cemí)")?;
+                }
+                Ok(())
+            }
+        }
+    }
+}
+
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(tag = "type", rename_all = "snake_case")]
 pub enum Object {
@@ -354,6 +509,7 @@ pub enum Object {
     Record(Record),
     Token(Token),
     Launcher(Launcher),
+    Approval(Approval),
 }
 
 impl Object {
@@ -363,6 +519,7 @@ impl Object {
             Object::Record(r) => &r.id,
             Object::Token(t) => &t.id,
             Object::Launcher(l) => &l.id,
+            Object::Approval(a) => &a.id,
         }
     }
 }
@@ -418,12 +575,7 @@ mod tests {
 
     #[test]
     fn env_falls_back_to_shared() {
-        let mut f = Field {
-            name: "x".into(),
-            kind: FieldKind::Text,
-            secret: true,
-            values: BTreeMap::new(),
-        };
+        let mut f = Field::new("x", FieldKind::Text, true);
         f.values
             .entry(SHARED.into())
             .or_default()

@@ -44,7 +44,8 @@ pub fn status(ctx: &mut Ctx) -> Result<i32> {
             v.records.values().filter(|r| !r.archived).count(),
             v.effective_envs(&root).join(", ")
         );
-        let items = crate::cmd_shared::attention(v, None);
+        let mut items = crate::cmd_shared::attention(v, None);
+        items.extend(crate::rotation::attention(&mut ctx.ws, scope, None));
         for a in &items {
             println!("  ! {}: {}", a.what, a.detail);
         }
@@ -315,18 +316,6 @@ pub fn task(ctx: &mut Ctx, cmd: TaskCmd) -> Result<i32> {
 }
 
 /// References inside a template text.
-pub fn template_refs(text: &str) -> Vec<String> {
-    let mut out = Vec::new();
-    let mut rest = text;
-    while let Some(s) = rest.find("{{") {
-        let after = &rest[s + 2..];
-        let Some(e) = after.find("}}") else { break };
-        out.push(after[..e].trim().to_string());
-        rest = &after[e + 2..];
-    }
-    out
-}
-
 pub fn deps(ctx: &mut Ctx, reference: &str) -> Result<i32> {
     let r = ctx.parse_ref(reference)?;
     let fname = r.require_field()?.to_string();
@@ -344,7 +333,7 @@ pub fn deps(ctx: &mut Ctx, reference: &str) -> Result<i32> {
                 for slot in f.values.values() {
                     let Some(val) = slot.current() else { continue };
                     let text = String::from_utf8_lossy(&val.bytes()).into_owned();
-                    for part in template_refs(&text) {
+                    for part in crate::resolve::template_refs(&text) {
                         let parsed = if let Some(abs) = part.strip_prefix('/') {
                             Ref::parse(abs).ok()
                         } else {
