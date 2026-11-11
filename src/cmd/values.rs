@@ -200,7 +200,18 @@ fn resolve_for_human(
     Ok((scope, val))
 }
 
-pub fn copy(ctx: &mut Ctx, reference: &str, env: Option<&str>) -> Result<i32> {
+pub fn copy(ctx: &mut Ctx, reference: Option<&str>, env: Option<&str>) -> Result<i32> {
+    let picked;
+    let (reference, env) = match reference {
+        Some(r) => (r, env),
+        None => match pick(ctx, env)? {
+            Some(p) => {
+                picked = p;
+                (picked.0.as_str(), picked.1.as_deref())
+            }
+            None => return Ok(1),
+        },
+    };
     let r = ctx.parse_ref(reference)?;
     r.require_field()?;
     let (scope, val) = resolve_for_human(ctx, &r, env)?;
@@ -228,6 +239,77 @@ pub fn copy(ctx: &mut Ctx, reference: &str, env: Option<&str>) -> Result<i32> {
         "Copied {r} to the clipboard. It is cleared in 30 seconds."
     ));
     Ok(0)
+}
+
+/// The picker of `cemi copy` without a reference: every value of the vaults
+/// here, found by typing part of its name, environment or purpose. Returns
+/// the reference and environment chosen, or `None` when cancelled.
+fn pick(ctx: &mut Ctx, env: Option<&str>) -> Result<Option<(String, Option<String>)>> {
+    use std::io::IsTerminal;
+    if !std::io::stdin().is_terminal() || !std::io::stderr().is_terminal() {
+        bail!(
+            "which value? Give a reference: cemi copy <record#field> (the picker needs a terminal)"
+        );
+    }
+    let mut items: Vec<(String, String, Option<String>)> = Vec::new();
+    for scope in [Scope::Local, Scope::Global] {
+        if ctx.ws.dir(scope).is_err() {
+            continue;
+        }
+        let v = ctx.ws.open(scope)?;
+        for rec in v.records.values().filter(|r| !r.archived) {
+            let path = v.record_path(rec);
+            let purpose = rec
+                .memory
+                .get(crate::model::memory_keys::PURPOSE)
+                .map(String::as_str)
+                .unwrap_or("");
+            for f in &rec.fields {
+                let reference = format!("{scope}:{path}#{}", f.name);
+                let mut add = |slot_env: Option<&str>| {
+                    let shown = slot_env.unwrap_or("all");
+                    let label = format!("{scope}:{path}#{}  [{shown}]  {purpose}", f.name);
+                    items.push((
+                        label.trim_end().to_string(),
+                        reference.clone(),
+                        slot_env.map(str::to_string),
+                    ));
+                };
+                match env {
+                    Some(e) => {
+                        if let Some((_, slot)) = f.slot_for(Some(e))
+                            && matches!(slot.current(), Some(Value::Text { .. }))
+                        {
+                            add(Some(e));
+                        }
+                    }
+                    None => {
+                        for (key, slot) in &f.values {
+                            if matches!(slot.current(), Some(Value::Text { .. })) {
+                                add((key != SHARED).then_some(key.as_str()));
+                            }
+                        }
+                    }
+                }
+            }
+        }
+    }
+    if items.is_empty() {
+        bail!(
+            "there is nothing to copy{}",
+            env.map(|e| format!(" in {e}")).unwrap_or_default()
+        );
+    }
+    items.sort();
+    let labels: Vec<&str> = items.iter().map(|(l, _, _)| l.as_str()).collect();
+    let choice = dialoguer::FuzzySelect::with_theme(&dialoguer::theme::ColorfulTheme::default())
+        .with_prompt("Copy which value? Type to search, Enter to copy, Esc to cancel")
+        .items(&labels)
+        .default(0)
+        .max_length(15)
+        .interact_opt()
+        .context("the picker failed")?;
+    Ok(choice.map(|i| (items[i].1.clone(), items[i].2.clone())))
 }
 
 /// Runs in a background process: sets the clipboard, waits, clears it if unchanged.

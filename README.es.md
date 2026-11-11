@@ -174,7 +174,7 @@ cemi scan --history      # busca tus valores en todo el historial de git
 |---|---|
 | Bóveda | `init [-g]`, `unlock`, `lock`, `status`, `recovery verify/reset/new`, `passwd`, `doctor`, `log` |
 | Estructura | `ls`, `add`, `mv`, `rm`, `field add/rm/edit`, `find`, `show` |
-| Valores | `set`, `generate`, `copy`, `reveal`, `history`, `revert` |
+| Valores | `set`, `generate`, `copy` (sin argumento: buscar y elegir), `reveal`, `history`, `revert` |
 | Memoria | `note`, `task`, `deps`, `doc` |
 | Ambientes | `env ls/add/rm/diff/protect/unprotect` |
 | Rotación | `origin set/rm`, `dest add/ls/rm`, `verify`, `push`, `check`, `rotate`, `revoke`, `incident`, `approve` |

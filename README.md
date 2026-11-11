@@ -177,7 +177,7 @@ Unlike pattern scanners, `cemi scan` looks for *your* values, whatever their for
 |---|---|
 | Vault | `init [-g]`, `unlock`, `lock`, `status`, `recovery verify/reset/new`, `passwd`, `doctor`, `log` |
 | Structure | `ls`, `add`, `mv`, `rm`, `field add/rm/edit`, `find`, `show` |
-| Values | `set`, `generate`, `copy`, `reveal`, `history`, `revert` |
+| Values | `set`, `generate`, `copy` (no argument: search and pick), `reveal`, `history`, `revert` |
 | Memory | `note`, `task`, `deps`, `doc` |
 | Environments | `env ls/add/rm/diff/protect/unprotect` |
 | Rotation | `origin set/rm`, `dest add/ls/rm`, `verify`, `push`, `check`, `rotate`, `revoke`, `incident`, `approve` |

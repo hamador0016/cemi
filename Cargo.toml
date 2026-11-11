@@ -41,6 +41,7 @@ zeroize = { version = "1.9", features = ["serde"] }
 crypto_box = { version = "0.9", features = ["seal"] }
 ureq = { version = "3.5", default-features = false, features = ["rustls", "json"] }
 clap_complete = { version = "4.6.11", features = ["unstable-dynamic"] }
+dialoguer = { version = "0.12.0", default-features = false, features = ["fuzzy-select"] }
 
 [dev-dependencies]
 assert_cmd = "2"

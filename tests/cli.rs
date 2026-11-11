@@ -351,3 +351,12 @@ fn pre_commit_hook_blocks_secrets() {
     let (_, status) = git(&["status", "--porcelain", "--ignored"]);
     assert!(status.contains("!! .cemi/"), "{status}");
 }
+
+#[test]
+fn copy_without_a_reference_needs_a_terminal() {
+    let env = Env::new();
+    env.setup();
+    let (code, _, err) = env.run(&["copy"], "");
+    assert_ne!(code, 0);
+    assert!(err.contains("Give a reference"), "{err}");
+}

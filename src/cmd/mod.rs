@@ -264,7 +264,7 @@ pub fn run(cli: Cli) -> Result<i32> {
             charset,
             note,
         } => values::generate(&mut ctx, &reference, env.as_deref(), length, charset, note),
-        C::Copy { reference, env } => values::copy(&mut ctx, &reference, env.as_deref()),
+        C::Copy { reference, env } => values::copy(&mut ctx, reference.as_deref(), env.as_deref()),
         C::Reveal { reference, env } => values::reveal(&mut ctx, &reference, env.as_deref()),
         C::History { reference, env } => values::history(&mut ctx, &reference, env.as_deref()),
         C::Revert {

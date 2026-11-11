@@ -128,10 +128,11 @@ pub enum Cmd {
         #[arg(long)]
         note: Option<String>,
     },
-    /// Copy a value to the clipboard for 30 seconds (kept out of clipboard history)
+    /// Copy a value to the clipboard for 30 seconds (kept out of clipboard history). Without a reference, pick one
     Copy {
+        /// record#field (without it: search and pick)
         #[arg(add = ArgValueCompleter::new(crate::complete::references))]
-        reference: String,
+        reference: Option<String>,
         /// Environment, like dev or prod (default: the value shared by all)
         #[arg(short, long, add = ArgValueCompleter::new(crate::complete::envs))]
         env: Option<String>,
