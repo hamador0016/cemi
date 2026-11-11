@@ -99,7 +99,7 @@ cemi mcp add supabase --env SUPABASE_ACCESS_TOKEN=global:accounts/supabase#token
 **What redaction does not cover.** A command that receives a secret in its environment can
 still send it elsewhere or print it in an encoding Cemí does not recognize. Cemí narrows this
 down: AI clients can only run the commands you list, in the environments you list. The
-credential proxy planned for v0.3 closes it for HTTP APIs, because the command never receives
+credential proxy planned for v0.4 closes it for HTTP APIs, because the command never receives
 the key. Until then, do not let an AI run commands with production secrets. Details in
 [docs/threat-model.md](docs/threat-model.md).
 

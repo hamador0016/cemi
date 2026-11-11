@@ -29,7 +29,7 @@ production secrets.
    true for every tool that injects secrets. Cemí limits it (allowlisted commands, chosen
    environments), but if an AI can edit the script that an allowed command runs, it can make
    that script leak the secret. Do not allow AI `run` in production until the credential proxy
-   (v0.3) exists, and treat any secret an AI could have reached as exposed: rotate it.
+   (v0.4) exists, and treat any secret an AI could have reached as exposed: rotate it.
 2. **Malware running as your user while the vault is unlocked.** It can read the session from
    the operating system's credential store, or simply run `cemi`. Lock the vault (`cemi lock`)
    when you do not need it; sessions expire after 15 minutes of inactivity.

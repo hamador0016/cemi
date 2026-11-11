@@ -29,7 +29,7 @@
 - Las variables del proyecto se manejan con `cemi var add/rm/ls` (no `cemi env add`, que es para ambientes).
 - `cemi env clone` no hace falta: los campos son de la estructura, así que `cemi env add staging` ya crea el ambiente vacío.
 - `self update` queda para cuando existan los instaladores; mientras tanto se actualiza con el mismo gestor con que se instaló.
-- `ask_value` (ventana para que el humano pegue un valor) queda para la app (v0.3); hoy el humano usa `cemi set` en su terminal.
+- `ask_value` (ventana para que el humano pegue un valor) queda para la app (v0.4); hoy el humano usa `cemi set` en su terminal.
 
 **Pendiente para publicar:** cuenta de crates.io para reservar `cemi`, y `cargo-dist` para los instaladores (npm, Homebrew, scripts). Ambos requieren instalar herramientas o crear cuentas, así que se deciden aparte.
 
@@ -290,8 +290,8 @@ Todo vive en **un solo ejecutable** `cemi`:
 | Servidor MCP | `cemi mcp serve` para Claude Code, Claude Desktop, ChatGPT, Cursor… | v0.1 |
 | Lanzador de MCP | `cemi mcp launch <nombre>` arranca **otros** servidores MCP con su token inyectado, para que no quede en texto plano en la configuración del cliente | v0.1 |
 | Conectores | §4.4 | v0.2 |
-| App visual (Tauri) | Árbol, editor, aprobaciones, avisos, auditoría | v0.3 |
-| Proxy de credenciales | APIs HTTP sin que el valor llegue a la IA | v0.3 |
+| App visual (Tauri) | Árbol, editor, aprobaciones, avisos, auditoría | v0.4 |
+| Proxy de credenciales | APIs HTTP sin que el valor llegue a la IA | v0.4 |
 | Sincronizar entre máquinas propias / compartir una entidad | Carpeta cifrada en git privado, nube o S3/R2; destinatarios age | v0.4 |
 
 ### 4.10 Integración con IAs
@@ -309,11 +309,11 @@ Todo vive en **un solo ejecutable** `cemi`:
 | `env_diff` | Diferencias entre ambientes | Libre |
 | `ask_value` | Abre una ventana para que **el humano** pegue un valor; la IA solo recibe "guardado" | Libre |
 | `generate` | Valor aleatorio guardado sin mostrarse | Libre |
-| `run` | Comando de la lista blanca con variables inyectadas; salida redactada | dev libre; prod hasta que exista el proxy (v0.3), con aprobación |
+| `run` | Comando de la lista blanca con variables inyectadas; salida redactada | dev libre; prod hasta que exista el proxy (v0.4), con aprobación |
 | `push` | Empuja el valor actual a destinos desactualizados | dev libre; prod con aprobación |
 | `rotate` | Flujo completo de §4.5; la IA recibe el plan y el resultado, nunca el valor | prod **siempre** con aprobación |
 | `propose_destination`, `propose_origin` | La IA *redacta* configuración no secreta | **Siempre** con aprobación |
-| `call_api` (v0.3) | Vía proxy, a un dominio permitido | Reglas por método/ruta |
+| `call_api` (v0.4) | Vía proxy, a un dominio permitido | Reglas por método/ruta |
 
 Resumen: **la IA configura y pide, Cemí ejecuta y tú apruebas.** Ejemplo: "se filtró la llave de Supabase de la tienda" → la IA llama a `rotate` → aparece el plan (Supabase crea una llave nueva; destinos: Netlify prod y `.env` local; verificación: `npm test`) → apruebas con Windows Hello → Cemí lo hace todo → la IA recibe "rotada, 2 destinos actualizados, la vieja revocada".
 
@@ -517,14 +517,14 @@ Todas las versiones compilan y pasan pruebas en Windows, macOS y Linux desde el 
 | Cifrado simétrico (si hace falta) | `chacha20poly1305` | 0.11 | MIT o Apache-2.0 |
 | Sellado para secretos de GitHub | `crypto_box` (`seal`) | 0.9 | MIT o Apache-2.0 |
 | HTTP para conectores | `reqwest` | 0.13 | MIT o Apache-2.0 |
-| SSH (v0.3) | `russh` | 0.65 | Apache-2.0 |
+| SSH (v0.4) | `russh` | 0.65 | Apache-2.0 |
 | Borrar secretos de la RAM | `zeroize`, `secrecy` | 1.9 / 0.10 | MIT o Apache-2.0 |
 | Llavero del sistema | `keyring` | 4.2 | MIT o Apache-2.0 |
 | Servidor MCP | `rmcp` (SDK oficial) | 3.9 | Apache-2.0 |
 | CLI | `clap` | 4.6 | MIT o Apache-2.0 |
 | Serialización | `serde`, `serde_json`, `toml` | 1.0 | MIT o Apache-2.0 |
 | Instaladores y versiones | `cargo-dist` | 0.34 | MIT o Apache-2.0 |
-| App visual (v0.3) | `tauri` | 2.12 | MIT o Apache-2.0 |
+| App visual (v0.4) | `tauri` | 2.12 | MIT o Apache-2.0 |
 
 Herramientas de CI: gitleaks (MIT), `cargo deny`, `cargo vet`. TruffleHog queda fuera por ser AGPL-3.0.
 
@@ -568,7 +568,7 @@ Nada de esto se compra. En crates.io y npm el nombre es del primero que publica 
 | Bóvedas | Global por PC (`~/.cemi/`) + local opcional por proyecto (`.cemi/`, nunca se sube) |
 | Idioma | Comandos en inglés; documentación en inglés y español |
 | Firma de código | No; se instala por gestores de paquetes o script, sin descarga manual |
-| IA en producción | Puede pedir `rotate` y `push` con plan visible y aprobación con PIN o biometría; nunca ve valores. `run` en prod llega con el proxy (v0.3) |
+| IA en producción | Puede pedir `rotate` y `push` con plan visible y aprobación con PIN o biometría; nunca ve valores. `run` en prod llega con el proxy (v0.4) |
 | Primeros conectores | GitHub, Supabase, `.env` local y de comando |
 
 **Siguiente paso:** crear el repo `cemi` (privado al inicio) y programar la v0.1 (§7).

@@ -96,7 +96,7 @@ cemi mcp add supabase --env SUPABASE_ACCESS_TOKEN=global:cuentas/supabase#token 
 **Lo que ocultar la salida no cubre.** Un comando que recibe un secreto en su entorno todavía
 puede enviarlo a otro lado o imprimirlo en una codificación que Cemí no reconoce. Cemí lo
 reduce: la IA solo corre los comandos que tú listas, en los ambientes que tú listas. El proxy
-de credenciales previsto para la v0.3 lo cierra para las API HTTP, porque el comando nunca
+de credenciales previsto para la v0.4 lo cierra para las API HTTP, porque el comando nunca
 recibe la llave. Mientras tanto, no dejes que una IA corra comandos con secretos de
 producción. Detalles en [docs/threat-model.md](docs/threat-model.md).
 
