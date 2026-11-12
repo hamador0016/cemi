@@ -39,6 +39,7 @@ allow-wildcard-paths = true
 # Fail on known vulnerabilities (RustSec). Every exception below says why it does
 # not affect Cemí and when to remove it. Review them on every age update.
 ignore = [
+  { id = "RUSTSEC-2024-0370", reason = "proc-macro-error is unmaintained (no vulnerability). It is a build-time macro helper pulled in on Linux only, through the GTK 3 bindings (glib-macros) that Tauri uses for its window and webview there. Remove when Tauri moves off GTK 3." },
   { id = "RUSTSEC-2026-0387", reason = "crypto-bigint 0.5 timing issues, pulled in by age 0.12 through p256/hpke for its P-256 'tag' recipients. Cemí only creates and uses X25519 identities, and age's X25519 identity never runs P-256 code, so the affected operations never touch Cemí's secrets. Remove once age depends on elliptic-curve 0.14 / crypto-bigint >= 0.7.6." },
   { id = "RUSTSEC-2026-0374", reason = "basic-toml is unmaintained (no vulnerability). age uses it via i18n-embed to read its own embedded localization config. Remove when age drops it." },
 ]
