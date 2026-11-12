@@ -41,13 +41,26 @@ valores.
 
 ## Instalar
 
+Desde la página de versiones, con el script de instalación (pone `cemi` en `~/.cargo/bin` y
+comprueba el SHA-256 de lo que baja):
+
 ```bash
-cargo install --git https://github.com/hamador0016/cemi --locked
+curl --proto '=https' --tlsv1.2 -LsSf https://github.com/hamador0016/cemi/releases/latest/download/cemi-installer.sh | sh
 ```
 
-Con la primera versión publicada: `cargo install cemi`, `npm install -g cemi`, Homebrew y un
-script de instalación, y también `npm install --save-dev cemi` o `mise use cemi` para fijarlo
-por proyecto.
+```powershell
+powershell -ExecutionPolicy Bypass -c "irm https://github.com/hamador0016/cemi/releases/latest/download/cemi-installer.ps1 | iex"
+```
+
+O con Rust:
+
+```bash
+cargo install cemi --locked
+```
+
+Cada archivo de una versión tiene una atestación de origen de GitHub Actions:
+`gh attestation verify <archivo> -R hamador0016/cemi` comprueba que se compiló desde este
+repositorio. `cemi self update` instala la versión más nueva cuando cemi vino del script.
 
 Autocompletado con Tab, incluidos los nombres de tus registros y ambientes mientras la bóveda
 está abierta: `cemi completion powershell` (o `bash`, `zsh`, `fish`, `elvish`) imprime la línea

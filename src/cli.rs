@@ -469,6 +469,10 @@ pub enum Cmd {
     #[command(subcommand)]
     Hook(HookCmd),
 
+    /// Update cemi itself (when it was installed with the install script)
+    #[command(name = "self", subcommand)]
+    SelfCmd(SelfCmd),
+
     /// Tab completion for your shell, including record and environment names
     #[command(
         after_help = "Names come from vaults that are already unlocked; completing never asks for a password."
@@ -982,6 +986,12 @@ pub enum SyncCmd {
     Init { remote: String },
     /// Copy a synced vault to this computer (-g: as the global vault; otherwise .cemi here)
     Clone { remote: String },
+}
+
+#[derive(Subcommand)]
+pub enum SelfCmd {
+    /// Download and install the newest release, checked with its SHA-256
+    Update,
 }
 
 #[derive(Subcommand)]

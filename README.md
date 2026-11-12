@@ -42,12 +42,26 @@ ever receiving the values.
 
 Cemí is a single executable.
 
+From the releases page, with the install script (it puts `cemi` in `~/.cargo/bin` and checks
+the download's SHA-256):
+
 ```bash
-cargo install --git https://github.com/hamador0016/cemi --locked
+curl --proto '=https' --tlsv1.2 -LsSf https://github.com/hamador0016/cemi/releases/latest/download/cemi-installer.sh | sh
 ```
 
-Coming with the first release: `cargo install cemi`, `npm install -g cemi`, Homebrew and
-an install script, plus `npm install --save-dev cemi` or `mise use cemi` to pin it per project.
+```powershell
+powershell -ExecutionPolicy Bypass -c "irm https://github.com/hamador0016/cemi/releases/latest/download/cemi-installer.ps1 | iex"
+```
+
+Or with Rust:
+
+```bash
+cargo install cemi --locked
+```
+
+Every file of a release has a build provenance attestation from GitHub Actions:
+`gh attestation verify <file> -R hamador0016/cemi` checks that it was built from this repository.
+`cemi self update` installs the newest release when cemi came from the install script.
 
 Tab completion, including your record and environment names while the vault is unlocked:
 `cemi completion powershell` (or `bash`, `zsh`, `fish`, `elvish`) prints the line for your

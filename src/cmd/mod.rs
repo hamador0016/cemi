@@ -207,6 +207,29 @@ fn tray(projects: &[std::path::PathBuf], foreground: bool) -> Result<i32> {
     crate::tray::run(watched, foreground)
 }
 
+/// `cemi self update`: the install script puts `cemi-update` (cargo-dist's
+/// updater) next to `cemi`; it downloads the newest release and checks its
+/// SHA-256 before replacing the program. Other installs update the way they
+/// were installed.
+fn self_update() -> Result<i32> {
+    let exe = std::env::current_exe()?;
+    let name = if cfg!(windows) {
+        "cemi-update.exe"
+    } else {
+        "cemi-update"
+    };
+    let updater = exe.with_file_name(name);
+    if !updater.is_file() {
+        return Err(crate::errors::not_found(
+            "this copy of cemi was not installed with the install script, so it updates the way it was installed: `cargo install cemi --locked` again, or the installer from the releases page",
+        ));
+    }
+    let status = std::process::Command::new(&updater)
+        .status()
+        .map_err(|e| anyhow::anyhow!("cannot run {}: {e}", updater.display()))?;
+    Ok(status.code().unwrap_or(1))
+}
+
 /// The line that turns on completion in a shell. The shell asks `cemi`
 /// itself each time, so completion stays right after updates.
 fn print_completion_setup(shell: crate::cli::Shell) {
@@ -302,6 +325,7 @@ pub fn run(cli: Cli) -> Result<i32> {
             Cmd::Mcp(McpCmd::Serve { .. }) => Some(("mcp serve", OTHER)),
             Cmd::Mcp(McpCmd::Launch { .. }) => Some(("mcp launch", OTHER)),
             Cmd::Completion { .. } => Some(("completion", OTHER)),
+            Cmd::SelfCmd(_) => Some(("self update", OTHER)),
             Cmd::Ci(crate::cli::CiCmd::Load { .. }) => Some(("ci load", OTHER)),
             Cmd::Reveal { .. } => Some(("reveal", "it prints the value alone, ready for a script")),
             Cmd::ClipboardHelper { .. } => Some(("__clipboard", OTHER)),
@@ -327,6 +351,9 @@ pub fn run(cli: Cli) -> Result<i32> {
     } = &cli.command
     {
         return tray(projects, *foreground);
+    }
+    if let Cmd::SelfCmd(crate::cli::SelfCmd::Update) = &cli.command {
+        return self_update();
     }
     if let crate::cli::Cmd::Completion { shell } = cli.command {
         print_completion_setup(shell);
@@ -528,6 +555,7 @@ pub fn run(cli: Cli) -> Result<i32> {
         } => scan_cmds::scan(&mut ctx, path, staged, history),
         C::Hook(c) => scan_cmds::hook(&mut ctx, c),
         C::Completion { .. } => unreachable!("handled before opening anything"),
+        C::SelfCmd(_) => unreachable!("handled before opening anything"),
         C::ClipboardHelper { seconds } => values::clipboard_helper(seconds),
     }
 }
