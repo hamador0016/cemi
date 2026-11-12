@@ -349,6 +349,13 @@ pub fn show(ctx: &mut Ctx, reference: &str) -> Result<i32> {
         v.record_path(&rec),
         if rec.archived { " — archived" } else { "" }
     );
+    if let Some(got) = &rec.received {
+        crate::outln!(
+            "  received from {} ({}); accepting a newer share updates it",
+            crate::share::short_key(&got.from),
+            ui::when(got.at, "%Y-%m-%d %H:%M")
+        );
+    }
     if !rec.memory.is_empty() {
         crate::outln!();
         for (k, val) in &rec.memory {

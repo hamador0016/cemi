@@ -134,8 +134,22 @@ pub struct Record {
     pub memory: BTreeMap<String, String>,
     #[serde(default)]
     pub archived: bool,
+    /// Set when the record came from another developer (`cemi share accept`).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub received: Option<Received>,
     pub created: Timestamp,
     pub updated: Timestamp,
+}
+
+/// Where a received record came from.
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+pub struct Received {
+    /// The sender's public key.
+    pub from: String,
+    /// The share, so a newer bundle of the same share updates it.
+    pub share: String,
+    /// When the newest bundle accepted was made.
+    pub at: Timestamp,
 }
 
 impl Record {
@@ -556,6 +570,24 @@ pub struct KnownProject {
     pub added: Timestamp,
 }
 
+/// What this vault gave another developer with `cemi share`, so `cemi status`
+/// can say when a shared value changed afterwards. No values, only digests.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct SentShare {
+    pub id: String,
+    /// The entity shared (its id in this vault).
+    pub entity: String,
+    /// The receiver's public key.
+    pub to: String,
+    /// A name for the receiver, given with `--name`.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub name: Option<String>,
+    pub envs: Vec<String>,
+    /// `<record id>#<field>#<env>` to the SHA-256 of the value sent.
+    pub sent: BTreeMap<String, String>,
+    pub at: Timestamp,
+}
+
 /// A change an AI client asked for in a protected environment. Nothing
 /// happens until a person runs `cemi approve`.
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -615,6 +647,7 @@ pub enum Object {
     Launcher(Launcher),
     Approval(Approval),
     Project(KnownProject),
+    Share(SentShare),
 }
 
 impl Object {
@@ -626,6 +659,7 @@ impl Object {
             Object::Launcher(l) => &l.id,
             Object::Approval(a) => &a.id,
             Object::Project(p) => &p.id,
+            Object::Share(s) => &s.id,
         }
     }
 }

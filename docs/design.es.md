@@ -53,7 +53,7 @@
 
 **Pendiente para publicar:** cuenta de crates.io para reservar `cemi`, y `cargo-dist` para los instaladores (npm, Homebrew, scripts). Ambos requieren instalar herramientas o crear cuentas, así que se deciden aparte.
 
-## Estado de la implementación (v0.3 en curso, 11 nov 2026)
+## Estado de la implementación (v0.3, 11 nov 2026)
 
 **Hecho y probado** (39 pruebas unitarias + 32 de punta a punta; la CI además prueba la acción de GitHub de verdad):
 
@@ -72,7 +72,36 @@
 - El roadmap decía `cemi export --to ci`; quedó como el grupo `cemi ci` (setup, export, load), porque son tres pasos con lugares distintos (tu máquina, el repo, el CI).
 - La acción de GitHub compila `cemi` desde el código (con caché) porque todavía no hay binarios publicados; con `cargo-dist` pasará a descargarlos.
 
-**Falta de la v0.3:** la extensión de VS Code (necesita instalar dependencias de npm: se decide aparte).
+- Extensión de VS Code (`editors/vscode`): JavaScript sin dependencias (el módulo `vscode` lo pone el editor), así no hubo que instalar nada de npm. Habla con la CLI solo por `--json` y nunca muestra valores, ni siquiera los no secretos. Para no colgarse con la bóveda cerrada usa la opción global `--no-input`. Busca `cemi` solo en el PATH (nunca en la carpeta abierta) y en Windows solo acepta `.exe`/`.com`. Las pruebas de la lógica corren con `node --test` en la CI. Empaquetarla como `.vsix` necesita `vsce` (npm); por ahora se instala desde la carpeta.
+
+## Estado de la implementación (v0.4, 11 nov 2026)
+
+**Hecho y probado** (las pruebas de punta a punta cubren el proxy, los conectores contra un servidor falso y las aprobaciones con el dispositivo simulado):
+
+- Proxy de credenciales (`src/proxy.rs`). Cada campo puede tener APIs (`cemi api add`): dirección, dónde va la llave (`bearer`, `basic`, `header:NOMBRE`, `query:NOMBRE`) y reglas `MÉTODO RUTA` con `*` dentro de un segmento y `**` para varios. Dar una dirección a una llave de un ambiente protegido pide la contraseña, porque la dirección decide adónde va la llave. Las rutas con `.`/`..`, barras codificadas, barras invertidas o `#` se rechazan en vez de limpiarse. No se siguen redirecciones y la llave se oculta en la respuesta.
+- Herramienta MCP `call_api` (permiso de token `api`). `cemi api call` hace lo mismo desde la terminal para probar las reglas.
+- `cemi run --proxy` y `[proxy]` en `cemi.toml`: un servidor HTTP en 127.0.0.1 (tiny_http) bajo una ruta aleatoria; las variables secretas con API reciben un marcador y las de `[proxy]` la dirección del proxy. El `run` de una IA en un ambiente protegido usa siempre el proxy y falla si queda algún secreto sin API. Antes de esto el `run` de la IA en prod solo dependía de `cemi.toml`, que la IA puede editar.
+- Aprobaciones con el dispositivo (`src/presence.rs`): Windows Hello con `UserConsentVerifier` (atado a la ventana de la consola con `IUserConsentVerifierInterop`) y Touch ID con LocalAuthentication. Se activa con `cemi approve-with device`, que pide la confirmación actual y una prueba del dispositivo. Si no está disponible, se pide la contraseña. Es una comprobación de presencia, igual que la contraseña escrita en `reauthenticate`: ninguna de las dos descifra nada (la sesión ya abrió la bóveda).
+- `cemi tray` (solo Windows, Win32 directo): ícono con aviso cuando llega una solicitud y menú para revisarlas. No abre la bóveda: cada bóveda escribe en `requests` cuántas solicitudes esperan, para no tener que descifrar ni mantener viva la sesión. Al hacer clic abre `cemi approve` en una consola nueva; `cemi approve` sin id deja elegir en una terminal.
+- Conectores: `cloudflare-token` (crea un token nuevo copiando permisos e IPs del actual y borra el viejo al final; no usa "roll" porque mata el valor viejo al instante y no habría vuelta atrás), `cloudflare-worker`, `netlify`, `vercel`, `resend-key` y `ssh` (con el `ssh` del sistema: lee el `.env` remoto, cambia la variable con las reglas locales y lo reemplaza solo si no cambió mientras tanto). Endpoints y permisos mínimos en `docs/connectors.md`.
+
+**Cambios respecto al diseño:**
+
+- No hay app de Tauri: la v0.4 pedía una bandeja con aprobaciones, y eso se hizo con Win32 y la CLI, sin un segundo programa ni dependencias de npm. El árbol, el editor y la auditoría visuales quedan para cuando haga falta.
+- `ask_value` sigue sin existir: la persona usa `cemi set`.
+- La bandeja solo existe en Windows; en macOS y Linux `cemi approve` y `cemi status` muestran las solicitudes.
+
+**Sin probar con cuentas reales:** Cloudflare, Netlify, Vercel y Resend (solo contra un servidor falso). Windows Hello y Touch ID con una persona real, y la bandeja vista en pantalla.
+
+## Estado de la implementación (v0.5, 11 nov 2026)
+
+**Hecho y probado** (dos bóvedas separadas y un repo git local en las pruebas):
+
+- `cemi share key` da la llave pública de la bóveda. `cemi share <entidad> --with <llave> -e dev` escribe un archivo age (armadura de texto) con la entidad y lo que tiene debajo, solo con el valor actual de los ambientes elegidos. Orígenes, destinos, APIs y comandos de verificación no viajan porque llevan credenciales y lugares de quien comparte. Compartir un ambiente protegido pide la contraseña.
+- La bóveda que comparte guarda solo huellas de lo enviado, así `cemi share ls` lo lista y `cemi status` avisa cuando un valor compartido cambió. `cemi share accept` importa; un archivo más viejo nunca pisa un valor más nuevo. Lo compartido no se puede quitar: se rota.
+- `cemi sync init/clone` y `cemi sync` con el `git` del sistema. Solo `vault.json` y `objects/*.age` van al repo; el candado, la auditoría (cada computadora tiene su cadena), las carpetas de proyectos y `requests` se quedan en cada máquina. Un objeto cambiado en los dos lados se descifra y se une dentro de `cemi sync` (no con un "merge driver" de git, porque hacen falta las llaves y el candado de la bóveda): todas las versiones se conservan, una edición gana a un borrado y un token revocado en un lado queda revocado. El encabezado tiene una fecha de cambio para que el cambio de contraseña más nuevo gane.
+
+**Sin probar:** sincronizar una bóveda local (solo la global), un remoto real por SSH y git con firmas obligatorias.
 
 ---
 

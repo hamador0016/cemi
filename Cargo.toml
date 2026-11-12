@@ -14,7 +14,7 @@ name = "cemi"
 path = "src/main.rs"
 
 [dependencies]
-age = "0.12"
+age = { version = "0.12", features = ["armor"] }
 aho-corasick = "1"
 anyhow = "1"
 argon2 = "0.6"

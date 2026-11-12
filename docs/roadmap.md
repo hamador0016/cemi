@@ -27,9 +27,7 @@ MCP server with scoped tokens, `mcp launch`, audit log, `scan` and the pre-commi
 
 *Done when:* a leaked key is replaced everywhere it is used with one command.
 
-## v0.3 — Daily use (in progress)
-
-Done:
+## v0.3 — Daily use (done)
 
 - `cemi import --discover`: finds the `.env` files in your projects, brings them into the vault
   and reports `.env` files committed to git or missing from `.gitignore`, values repeated
@@ -50,28 +48,29 @@ Done:
 - `cemi deps` across projects: each vault remembers the projects that use it, so one command
   lists every project, template, connector, MCP server, destination and CI file that uses a
   value. `cemi status` warns about CI files with old values; `cemi rotate` lists them.
-
-Left:
-
-- VS Code extension: hover a variable to see its purpose, expiry and rotation steps (never the
-  value); warnings for secrets written in code.
+- VS Code extension ([editors/vscode](../editors/vscode)): hover a variable to see its purpose,
+  expiry and rotation steps (never the value); warnings for secrets written in code.
 
 *Done when:* someone who installs Cemí moves their `.env` files into it on day one and keeps
 using it.
 
-## v0.4 — Production
+## v0.4 — Production (done)
 
-- Desktop app (tray) with approvals through Windows Hello or Touch ID.
-- Credential proxy: the AI calls HTTP APIs and the proxy adds the key, so the command never
-  receives it. This enables AI `run` in production.
-- More connectors: Cloudflare, Netlify, Vercel, Resend, servers over SSH.
+- Approvals with Windows Hello or Touch ID (`cemi approve-with device`), and a tray icon on
+  Windows (`cemi tray`) that tells you when an AI asks for approval.
+- Credential proxy: the AI calls HTTP APIs (`call_api`) and Cemí adds the key, only for the
+  methods and paths you allow (`cemi api add`), so the AI never receives it. AI `run` in a
+  protected environment works only when every secret goes through the proxy (`[proxy]` in
+  `cemi.toml`).
+- More connectors: Cloudflare (tokens and Worker secrets), Netlify, Vercel, Resend, servers over
+  SSH.
 
 *Done when:* an AI can test production APIs without ever holding a production key.
 
-## v0.5 — Teams and several machines
+## v0.5 — Teams and several machines (done)
 
-- `cemi share acme/shop --with <public key>`: give one entity to another developer. Every object
-  is already encrypted to a list of recipients, so no server is needed.
+- `cemi share acme/shop --with <public key> -e dev`: give one entity to another developer, with
+  only the environments you choose, in a file encrypted to their vault's key. No server.
 - `cemi sync`: the vault is one encrypted file per object, so it syncs through a private git
   repository, with conflicts resolved object by object.
 

@@ -142,6 +142,7 @@ pub fn attention(v: &Vault, only: Option<&[String]>) -> Vec<Attention> {
             }
         }
     }
+    out.extend(crate::share::attention(v, only));
     if !v.unreadable.is_empty() {
         out.push(Attention {
             what: "vault".into(),

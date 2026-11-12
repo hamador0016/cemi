@@ -299,6 +299,48 @@ solicitudes esperan, así que nunca abre la bóveda ni la deja abierta. En Linux
 Hello o Touch ID no estén configurados, Cemí pide la contraseña. El ícono de la bandeja solo
 existe en Windows.
 
+## Compartir una entidad
+
+Dale una entidad a otro desarrollador, con los valores de los ambientes que elijas y nada más.
+Sin servidor: el archivo va cifrado con age a la llave de su bóveda.
+
+```bash
+cemi share key                                        # en su computadora: su llave pública
+cemi share acme/shop --with age1… -e dev --name ana   # en la tuya: escribe acme-shop.share.age
+cemi share accept acme-shop.share.age                 # en la suya, después de mandarle el archivo
+```
+
+El archivo lleva la entidad y todo lo que tiene debajo: registros, campos, notas y los valores
+de `dev`. Los otros ambientes, los orígenes, los destinos, las APIs y los comandos de
+verificación se quedan en tu bóveda, porque tienen tus credenciales y tus lugares. Compartir un
+ambiente protegido (`prod`) pide tu contraseña.
+
+Tu bóveda recuerda qué compartiste y con quién (`cemi share ls`). Cuando un valor compartido
+cambia, `cemi status` lo dice: vuelve a compartir y la otra persona acepta el archivo nuevo. Un
+archivo más nuevo actualiza su copia; uno más viejo nunca reemplaza un valor más nuevo. Lo
+compartido no se puede retirar: quien recibió un valor lo conserva, así que cuando alguien debe
+perder el acceso, rota la llave.
+
+## Sincronizar tus máquinas
+
+La bóveda es un archivo cifrado por objeto, así que un repositorio git privado la lleva entre tus
+computadoras:
+
+```bash
+cemi sync init git@github.com:tu/boveda.git -g    # una vez, en la primera (repositorio vacío)
+cemi sync clone git@github.com:tu/boveda.git -g   # en cada otra computadora; misma contraseña
+cemi sync -g                                      # manda y recibe cambios
+```
+
+A git solo van `vault.json` (la llave pública de la bóveda y su llave envuelta por tu contraseña y
+tu código de recuperación) y `objects/*.age`. Cada objeto va cifrado con age, así que el
+repositorio no tiene ningún valor, nombre ni nota en claro. El registro de auditoría, el candado
+y las carpetas de los proyectos conocidos se quedan en cada computadora. Si dos computadoras
+cambiaron el mismo registro, `cemi sync` abre las dos copias y las une: se conservan todas las
+versiones de cada valor y la más nueva queda como actual, y se conservan los campos, notas,
+destinos y APIs que se agregaron de cada lado. Una contraseña cambiada en una computadora llega a
+las otras en su siguiente sincronización.
+
 ## Nunca subir un secreto
 
 ```bash
@@ -318,6 +360,7 @@ cemi scan --history      # busca tus valores en todo el historial de git
 | Rotación | `origin set/rm`, `dest add/ls/rm`, `verify`, `push`, `check`, `rotate`, `revoke`, `incident`, `approve`, `approve-with`, `tray` |
 | Proyecto | `preset ls/add`, `link`, `var add/rm/ls`, `project ls/add/rm`, `run`, `types`, `ci setup/export/load`, `export`, `import` (`--discover` para todos tus proyectos) |
 | IA | `token create/ls/revoke`, `mcp serve/setup/add/launch/ls/rm`, `api add/ls/rm/call`, `run --proxy` |
+| Equipos y computadoras | `share` (`key`, `accept`, `ls`), `sync` (`init`, `clone`) |
 | Git | `scan`, `hook install` |
 
 Las referencias tienen la forma `[global:|local:]entidad/registro#campo`.
@@ -328,12 +371,14 @@ versiones: ver [docs/scripting.md](docs/scripting.md).
 ## Próximas versiones
 
 - **v0.2**: rotación, con orígenes, destinos y aprobaciones.
-- **v0.3** (en curso, casi lista): uso diario: encontrar los `.env` que ya tienes,
-  autocompletado, presets, tipos para tu código, `--json`, secretos en CI, módulo para el
-  prompt. Falta: la extensión de VS Code.
-- **v0.4**: app de escritorio y proxy de credenciales (la IA llama a las API sin recibir la
-  llave).
-- **v0.5**: sincronizar entre tus máquinas y compartir una entidad con otra persona.
+- **v0.3**: uso diario: encontrar los `.env` que ya tienes, autocompletado, presets, tipos para
+  tu código, `--json`, secretos en CI, módulo para el prompt, la extensión de VS Code.
+- **v0.4**: proxy de credenciales (la IA llama a las API sin recibir la llave), aprobaciones
+  con Windows Hello o Touch ID, un ícono en la bandeja, conectores para Cloudflare, Netlify,
+  Vercel, Resend y SSH.
+- **v0.5**: compartir una entidad con otra persona y sincronizar entre tus máquinas.
+- **Después**: lo que va antes de la primera versión pública (pruebas de compatibilidad,
+  fuzzing, versiones verificables).
 
 Plan completo: [docs/roadmap.es.md](docs/roadmap.es.md). Diseño: [docs/design.es.md](docs/design.es.md).
 

@@ -298,6 +298,46 @@ you confirm. Clicking the tray icon opens that list. The tray reads only how man
 waiting, so it never opens the vault or keeps it unlocked. On Linux, and wherever Windows Hello or
 Touch ID is not set up, Cemí asks for the password. The tray icon is only available on Windows.
 
+## Share an entity
+
+Give one entity to another developer, with the values of the environments you choose and
+nothing else. No server: the file is encrypted with age to their vault's key.
+
+```bash
+cemi share key                                        # on their computer: their public key
+cemi share acme/shop --with age1… -e dev --name ana   # on yours: writes acme-shop.share.age
+cemi share accept acme-shop.share.age                 # on theirs, after you send the file
+```
+
+The file carries the entity and everything below it: records, fields, notes and the `dev`
+values. Other environments, origins, destinations, APIs and verify commands stay in your vault,
+because they hold your credentials and places. Sharing a protected environment (`prod`) asks for
+your password.
+
+Your vault remembers what you shared and with whom (`cemi share ls`). When a shared value
+changes, `cemi status` says so: share again and they accept the new file. A newer file updates
+their copy; an older one never replaces a newer value. A share cannot be taken back: whoever
+received a value keeps it, so when someone should lose access, rotate the key.
+
+## Sync your machines
+
+The vault is one encrypted file per object, so a private git repository can carry it between
+your computers:
+
+```bash
+cemi sync init git@github.com:you/vault.git -g    # once, on the first computer (empty repository)
+cemi sync clone git@github.com:you/vault.git -g   # on each other computer; same password
+cemi sync -g                                      # send and receive changes
+```
+
+Only `vault.json` (the vault's public key and its key wrapped by your password and recovery
+code) and `objects/*.age` go to git. Every object is encrypted with age, so the repository holds
+no value, name or note in clear. The audit log, the lock and the folders of known projects stay
+on each computer. When two computers changed the same record, `cemi sync` opens both copies and
+merges them: every version of every value is kept and the newest one is current, and fields,
+notes, destinations and APIs added on either side are kept. A password changed on one computer
+reaches the others on their next sync.
+
 ## Never commit a secret
 
 ```bash
@@ -319,6 +359,7 @@ Unlike pattern scanners, `cemi scan` looks for *your* values, whatever their for
 | Rotation | `origin set/rm`, `dest add/ls/rm`, `verify`, `push`, `check`, `rotate`, `revoke`, `incident`, `approve`, `approve-with`, `tray` |
 | Project | `preset ls/add`, `link`, `var add/rm/ls`, `project ls/add/rm`, `run`, `types`, `ci setup/export/load`, `export`, `import` (`--discover` for every project) |
 | AI | `token create/ls/revoke`, `mcp serve/setup/add/launch/ls/rm`, `api add/ls/rm/call`, `run --proxy` |
+| Teams and computers | `share` (`key`, `accept`, `ls`), `sync` (`init`, `clone`) |
 | Git | `scan`, `hook install` |
 
 `cemi help <command>` explains each one. References look like `[global:|local:]entity/record#field`.
@@ -341,11 +382,14 @@ Design notes (Spanish): [docs/design.es.md](docs/design.es.md).
 ## Roadmap
 
 - **v0.2**: rotation, with origins, destinations and approvals.
-- **v0.3** (in progress, mostly done): daily use: discover existing `.env` files, shell
-  completions, presets, types for your code, `--json`, secrets in CI, a prompt module. Left:
-  the VS Code extension.
-- **v0.4**: desktop app and credential proxy (the AI calls APIs without receiving the key).
-- **v0.5**: sync between your machines and sharing one entity with someone else.
+- **v0.3**: daily use: discover existing `.env` files, shell completions, presets, types for
+  your code, `--json`, secrets in CI, a prompt module, the VS Code extension.
+- **v0.4**: credential proxy (the AI calls APIs without receiving the key), approvals with
+  Windows Hello or Touch ID, a tray icon, connectors for Cloudflare, Netlify, Vercel, Resend and
+  SSH.
+- **v0.5**: sharing one entity with someone else, and sync between your machines.
+- **Next**: what comes before the first public release (compatibility tests, fuzzing, verifiable
+  releases).
 
 Full plan: [docs/roadmap.md](docs/roadmap.md).
 

@@ -7,6 +7,7 @@ mod memory;
 mod project_cmds;
 mod rotation_cmds;
 mod scan_cmds;
+mod share_cmds;
 mod structure;
 mod values;
 mod vault_cmds;
@@ -265,6 +266,10 @@ fn writes(cmd: &Cmd) -> bool {
         ) => false,
         Cmd::Var(_) => false,
         Cmd::Project(ProjectCmd::Ls | ProjectCmd::Add { .. }) => false,
+        Cmd::Share(ShareArgs {
+            cmd: Some(ShareCmd::Key | ShareCmd::Ls),
+            ..
+        }) => false,
         Cmd::Note(n) => {
             n.purpose.is_some()
                 || n.used_in.is_some()
@@ -395,6 +400,8 @@ pub fn run(cli: Cli) -> Result<i32> {
         C::Note(args) => memory::note(&mut ctx, args),
         C::Task(c) => memory::task(&mut ctx, c),
         C::Deps { reference } => memory::deps(&mut ctx, &reference),
+        C::Share(args) => share_cmds::share(&mut ctx, args),
+        C::Sync(args) => share_cmds::sync(&mut ctx, args),
         C::Doc { entity, output } => memory::doc(&mut ctx, entity.as_deref(), output),
         C::Env(c) => structure::env(&mut ctx, c),
         C::Link { entity } => project_cmds::link(&mut ctx, entity.as_deref()),
