@@ -15,7 +15,7 @@ valores.
 
 *El nombre viene del cemí taíno, una figura tallada que protegía lo que su dueño valoraba.*
 
-> **Estado: v0.5, temprana.** El formato y los comandos todavía pueden cambiar. Lee
+> **Estado: v0.6, temprana.** El formato y los comandos todavía pueden cambiar. Lee
 > [docs/threat-model.md](docs/threat-model.md) antes de confiarle secretos de producción.
 
 ## Por qué
@@ -489,9 +489,10 @@ versiones: ver [docs/scripting.md](docs/scripting.md).
 - **v0.4**: proxy de credenciales (la IA llama a las API sin recibir la llave), aprobaciones
   con Windows Hello o Touch ID, un ícono en la bandeja, conectores para Cloudflare, Netlify,
   Vercel, Resend y SSH.
-- **v0.5**: compartir una entidad con otra persona y sincronizar entre tus máquinas.
-- **Después**: lo que va antes de la primera versión pública (pruebas de compatibilidad,
-  fuzzing, versiones verificables).
+- **v0.5**: compartir una entidad con otra persona y sincronizar entre tus máquinas; la primera
+  versión pública, con instaladores verificables.
+- **v0.6**: `cemi mcp setup` para ocho clientes de IA, el skill de Cemí para agentes, importar
+  desde Doppler y 1Password, y conectores en beta para AWS, GitLab, Fly.io y OpenAI.
 
 Plan completo: [docs/roadmap.es.md](docs/roadmap.es.md). Diseño: [docs/design.es.md](docs/design.es.md).
 

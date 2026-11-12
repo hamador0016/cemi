@@ -4,7 +4,7 @@ Every version builds and passes its tests on Windows, macOS and Linux. Versions 
 [semantic versioning](https://semver.org); while Cemí is below 1.0, a new minor version may
 change commands. Vaults made by any earlier version keep opening (`tests/compat.rs`).
 
-## Unreleased
+## 0.6.0 (2026-11-12)
 
 ### Added
 - The Cemí skill (`plugins/cemi`): teaches coding agents to use Cemí's MCP tools and never

@@ -1,7 +1,7 @@
 {
   "name": "cemi",
   "description": "Use API keys and passwords from Cemí's encrypted vault without seeing their values",
-  "version": "0.5.0",
+  "version": "0.6.0",
   "author": {
     "name": "hamador0016",
     "url": "https://github.com/hamador0016"

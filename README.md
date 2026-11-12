@@ -15,7 +15,7 @@ ever receiving the values.
 
 *The name comes from the Taíno cemí, a carved figure that guarded what its owners valued.*
 
-> **Status: v0.5, early.** The format and commands may still change. Read
+> **Status: v0.6, early.** The format and commands may still change. Read
 > [docs/threat-model.md](docs/threat-model.md) before trusting it with production secrets.
 
 ## Why
@@ -496,9 +496,10 @@ Design notes (Spanish): [docs/design.es.md](docs/design.es.md).
 - **v0.4**: credential proxy (the AI calls APIs without receiving the key), approvals with
   Windows Hello or Touch ID, a tray icon, connectors for Cloudflare, Netlify, Vercel, Resend and
   SSH.
-- **v0.5**: sharing one entity with someone else, and sync between your machines.
-- **Next**: what comes before the first public release (compatibility tests, fuzzing, verifiable
-  releases).
+- **v0.5**: sharing one entity with someone else, and sync between your machines; the first
+  public release, with verifiable installers.
+- **v0.6**: `cemi mcp setup` for eight AI clients, the Cemí skill for agents, imports from
+  Doppler and 1Password, and connectors in beta for AWS, GitLab, Fly.io and OpenAI.
 
 Full plan: [docs/roadmap.md](docs/roadmap.md).
 
