@@ -304,7 +304,42 @@ pub fn affected(ws: &mut Workspace, target: &FieldRef, slot: &str) -> Result<Vec
             }
         }
     }
+    // The origin's id field gets a new value in the same rotation.
+    if let Some(idf) = id_field_ref(&field, target, slot)
+        && let Ok(f) = idf.field(ws).cloned()
+    {
+        // Which of its destinations see slot `slot` once it is written there.
+        let sees = |env: &str| -> bool {
+            let own = env == slot || slot_env(env).is_some_and(|e| f.values.contains_key(e));
+            if own { env == slot } else { slot == SHARED }
+        };
+        let mut fields = vec![idf.clone()];
+        fields.extend(dependents(ws, &idf)?);
+        for fr in fields {
+            let dests = fr.field(ws)?.destinations.clone();
+            for d in dests {
+                let r = DestRef {
+                    field: fr.clone(),
+                    id: d.id.clone(),
+                };
+                if sees(&d.env) && !out.contains(&r) {
+                    out.push(r);
+                }
+            }
+        }
+    }
     Ok(out)
+}
+
+/// The field of the same record where the origin of `slot` writes each new
+/// key's id (AWS access keys), if it has one.
+fn id_field_ref(field: &Field, target: &FieldRef, slot: &str) -> Option<FieldRef> {
+    let name = field.origins.get(slot)?.spec.id_field()?;
+    Some(FieldRef {
+        scope: target.scope,
+        record_id: target.record_id.clone(),
+        field: name.to_string(),
+    })
 }
 
 /// Protected environments that an action for `env` on these destinations
@@ -624,6 +659,7 @@ pub fn describe_plan(
         }
     });
     let dests = affected(ws, fr, &slot)?;
+    let id_field = id_field_ref(&f, fr, &slot);
     if dests.is_empty() {
         out.push("2. Destinations: none yet (`cemi dest add` adds them)".into());
     } else {
@@ -632,6 +668,8 @@ pub fn describe_plan(
             if let Ok(x) = destination(ws, d) {
                 let via = if d.field == *fr {
                     String::new()
+                } else if id_field.as_ref() == Some(&d.field) {
+                    format!(" (the new key's id, {})", d.field.text(ws))
                 } else {
                     format!(" (inside {})", d.field.text(ws))
                 };
@@ -834,6 +872,36 @@ pub fn rotate(
         s.activate(pending);
         prev
     };
+    let id_change = match set_id_field(
+        ws,
+        fr,
+        &slot,
+        origin.as_ref().map(|o| &o.spec),
+        pending,
+        previous,
+        actor,
+    ) {
+        Ok(c) => c,
+        Err(e) => {
+            let undo = Undo {
+                fr,
+                slot: &slot,
+                pending,
+                previous,
+                sent: &[],
+                origin: origin.as_ref().map(|o| &o.spec),
+                id_change: None,
+            };
+            undo.run(ws, progress);
+            return Err(e.context(format!("the rotation of {name} failed and was undone")));
+        }
+    };
+    if let Some(c) = &id_change {
+        progress(
+            Step::Done,
+            &format!("Saved the new key's id in {}", c.field.text(ws)),
+        );
+    }
     let dests = affected(ws, fr, &slot)?;
     let mut sent: Vec<DestRef> = Vec::new();
     let mut failure: Option<anyhow::Error> = None;
@@ -873,6 +941,7 @@ pub fn rotate(
             previous,
             sent: &sent,
             origin: origin.as_ref().map(|o| &o.spec),
+            id_change: id_change.as_ref(),
         };
         let complete = undo.run(ws, progress);
         audit(
@@ -956,6 +1025,92 @@ pub fn rotate(
     Ok(())
 }
 
+/// What a rotation changed in the origin's id field, to undo it.
+struct IdChange {
+    field: FieldRef,
+    /// Its active version before the rotation (None: it had no value).
+    previous: Option<usize>,
+    new: usize,
+}
+
+/// Writes the new key's provider id to the origin's id field, as its
+/// current value. The id field holds the id of the key in use, so when the
+/// previous version has no provider id (a key Cemí did not create), the id
+/// field's old value becomes it: the old key can then be revoked by id.
+fn set_id_field(
+    ws: &mut Workspace,
+    fr: &FieldRef,
+    slot: &str,
+    origin: Option<&OriginSpec>,
+    pending: usize,
+    previous: Option<usize>,
+    actor: &str,
+) -> Result<Option<IdChange>> {
+    let Some(name) = origin.and_then(|o| o.id_field()) else {
+        return Ok(None);
+    };
+    let id = fr
+        .field(ws)?
+        .values
+        .get(slot)
+        .and_then(|s| s.versions.get(pending))
+        .and_then(|v| v.provider_id.clone())
+        .ok_or_else(|| anyhow!("the origin did not report the new key's id"))?;
+    let idf = FieldRef {
+        scope: fr.scope,
+        record_id: fr.record_id.clone(),
+        field: name.to_string(),
+    };
+    {
+        let v = ws.open(fr.scope)?;
+        let rec = v.record_mut(&fr.record_id);
+        if rec.field(name).is_none() {
+            rec.fields.push(Field::new(name, FieldKind::Text, false));
+        }
+    }
+    let s = idf
+        .field_mut(ws)?
+        .values
+        .entry(slot.to_string())
+        .or_default();
+    let active = s.active_index();
+    let holds_new = active.is_some_and(|i| *s.versions[i].value.bytes() == *id.as_bytes());
+    let (old, new) = match active {
+        // An unfinished rotation already wrote it.
+        Some(i) if holds_new => (
+            s.versions[..i]
+                .iter()
+                .rposition(|v| v.state == VersionState::Archived),
+            i,
+        ),
+        _ => {
+            s.push(
+                Value::text(id.as_str()),
+                actor,
+                Some("rotation: id of the new key".into()),
+            );
+            (active, s.versions.len() - 1)
+        }
+    };
+    let old_id = old.and_then(|i| {
+        String::from_utf8(s.versions[i].value.bytes().to_vec())
+            .ok()
+            .map(|t| t.trim().to_string())
+            .filter(|t| !t.is_empty())
+    });
+    if let (Some(prev), Some(old_id)) = (previous, old_id) {
+        let main = fr.field_mut(ws)?.values.get_mut(slot).expect("exists");
+        if main.versions[prev].provider_id.is_none() {
+            main.versions[prev].provider_id = Some(old_id);
+        }
+    }
+    Ok(Some(IdChange {
+        field: idf,
+        previous: old,
+        new,
+    }))
+}
+
 /// What to undo after a failed rotation.
 struct Undo<'a> {
     fr: &'a FieldRef,
@@ -964,6 +1119,7 @@ struct Undo<'a> {
     previous: Option<usize>,
     sent: &'a [DestRef],
     origin: Option<&'a OriginSpec>,
+    id_change: Option<&'a IdChange>,
 }
 
 impl Undo<'_> {
@@ -988,6 +1144,18 @@ impl Undo<'_> {
                 s.activate(prev);
             }
             s.versions[self.pending].state = VersionState::Pending;
+            if let Some(c) = self.id_change {
+                let s = c
+                    .field
+                    .field_mut(ws)?
+                    .values
+                    .get_mut(self.slot)
+                    .expect("exists");
+                match c.previous {
+                    Some(p) => s.activate(p),
+                    None => s.versions[c.new].state = VersionState::Archived,
+                }
+            }
             Ok(())
         };
         if let Err(e) = set_states(ws) {

@@ -65,6 +65,19 @@ pub fn request(
     headers: &[(&str, &str)],
     body: Option<&serde_json::Value>,
 ) -> Result<Response> {
+    match body {
+        Some(b) => {
+            let mut all = headers.to_vec();
+            all.push(("content-type", "application/json"));
+            let payload = zeroize::Zeroizing::new(serde_json::to_vec(b)?);
+            send(method, url, &all, &payload)
+        }
+        None => send(method, url, headers, &[]),
+    }
+}
+
+/// Sends a body as it is; the caller sets its content type (AWS signs it).
+pub fn send(method: &str, url: &str, headers: &[(&str, &str)], payload: &[u8]) -> Result<Response> {
     check_url(url)?;
     let config = ureq::Agent::config_builder()
         .timeout_global(Some(Duration::from_secs(30)))
@@ -76,13 +89,6 @@ pub fn request(
     for (k, v) in headers {
         builder = builder.header(*k, *v);
     }
-    let payload = match body {
-        Some(b) => {
-            builder = builder.header("content-type", "application/json");
-            serde_json::to_vec(b)?
-        }
-        None => Vec::new(),
-    };
     let req = builder.body(payload).context("bad request")?;
     let host = url.split('/').nth(2).unwrap_or(url).to_string();
     let mut resp = agent

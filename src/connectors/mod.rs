@@ -1,21 +1,30 @@
 //! Connectors: where a key is created (origins) and where it is copied to
 //! (destinations).
 //!
-//! Built in: Supabase, Cloudflare and Resend API keys (origins); GitHub
-//! Actions secrets, Supabase function secrets, Cloudflare Workers secrets,
-//! Netlify and Vercel variables, `.env` files here or on a server over SSH
-//! (destinations); and commands (both).
+//! Built in: Supabase, Cloudflare, Resend and OpenAI API keys and AWS IAM
+//! access keys (origins); GitHub Actions secrets, Supabase function secrets,
+//! Cloudflare Workers secrets, Netlify, Vercel and GitLab variables, Fly.io
+//! secrets, AWS Secrets Manager secrets and Parameter Store parameters,
+//! `.env` files here or on a server over SSH (destinations); and commands
+//! (both).
 //! Anyone can add a provider as an external program, `cemi-connector-<name>`,
 //! that speaks JSON on stdin/stdout (see docs/connectors.md).
 //!
 //! Values travel only in request bodies and stdin, never as arguments.
 //! Credentials for providers are references to other records of the vault.
 
+mod aws;
+mod aws_iam;
+mod aws_secrets;
+mod aws_ssm;
 mod cloudflare;
 mod command;
+mod fly;
 mod github;
+mod gitlab;
 mod http;
 mod netlify;
+mod openai;
 mod resend;
 mod ssh;
 mod supabase;
@@ -75,6 +84,33 @@ pub enum OriginSpec {
         /// For sending_access: the only domain it may send from.
         #[serde(default, skip_serializing_if = "Option::is_none")]
         domain: Option<String>,
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        api_url: Option<String>,
+    },
+    /// An AWS IAM access key. The value is the secret access key; the access
+    /// key id is the provider id, and optionally goes to `id_field`.
+    AwsAccessKey {
+        /// None: the user that owns the signing key.
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        user: Option<String>,
+        /// References to the credentials that sign IAM requests.
+        access_key_id: String,
+        secret_access_key: String,
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        session_token: Option<String>,
+        /// A field of the same record that gets each new key's access key id.
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        id_field: Option<String>,
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        api_url: Option<String>,
+    },
+    /// An OpenAI API key of a project service account.
+    OpenaiKey {
+        project: String,
+        service_account: String,
+        /// Reference to an OpenAI Admin API key.
+        token: String,
+        name: String,
         #[serde(default, skip_serializing_if = "Option::is_none")]
         api_url: Option<String>,
     },
@@ -151,6 +187,58 @@ pub enum DestSpec {
         #[serde(default, skip_serializing_if = "Option::is_none")]
         api_url: Option<String>,
     },
+    /// A GitLab CI/CD variable of a project.
+    Gitlab {
+        /// Numeric id or path (`acme/shop`).
+        project: String,
+        key: String,
+        environment_scope: String,
+        masked: bool,
+        protected: bool,
+        /// Masked and hidden (only when GitLab creates the variable).
+        hidden: bool,
+        token: String,
+        /// For self-managed GitLab: https://HOST/api/v4.
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        api_url: Option<String>,
+    },
+    /// A Fly.io app secret.
+    Fly {
+        app: String,
+        name: String,
+        token: String,
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        api_url: Option<String>,
+    },
+    /// An AWS Secrets Manager secret.
+    AwsSecret {
+        /// Name or ARN.
+        secret_id: String,
+        region: String,
+        /// KMS key for a secret Cemí creates (default: aws/secretsmanager).
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        kms_key: Option<String>,
+        access_key_id: String,
+        secret_access_key: String,
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        session_token: Option<String>,
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        api_url: Option<String>,
+    },
+    /// An AWS Systems Manager Parameter Store parameter (SecureString).
+    AwsParameter {
+        name: String,
+        region: String,
+        /// KMS key (default: the account's aws/ssm key).
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        kms_key: Option<String>,
+        access_key_id: String,
+        secret_access_key: String,
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        session_token: Option<String>,
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        api_url: Option<String>,
+    },
     /// One variable of a `.env` file on this computer.
     Dotenv { file: PathBuf, key: String },
     /// One variable of a `.env` file on a server, over SSH.
@@ -221,6 +309,17 @@ impl OriginSpec {
                 None => format!("Cloudflare: API token \"{name} …\""),
             },
             OriginSpec::ResendKey { name, .. } => format!("Resend: API key \"{name} …\""),
+            OriginSpec::AwsAccessKey { user, .. } => match user {
+                Some(u) => format!("AWS IAM: access key of the user {u}"),
+                None => "AWS IAM: access key of the signing user".into(),
+            },
+            OriginSpec::OpenaiKey {
+                project,
+                service_account,
+                ..
+            } => format!(
+                "OpenAI project {project}: API key of the service account {service_account}"
+            ),
             OriginSpec::Command { command } => format!("command `{}`", command.join(" ")),
             OriginSpec::External { name, .. } => format!("connector {name}"),
         }
@@ -231,11 +330,37 @@ impl OriginSpec {
         match self {
             OriginSpec::SupabaseKey { token, .. }
             | OriginSpec::CloudflareToken { token, .. }
-            | OriginSpec::ResendKey { token, .. } => vec![token.as_str()],
+            | OriginSpec::ResendKey { token, .. }
+            | OriginSpec::OpenaiKey { token, .. } => vec![token.as_str()],
+            OriginSpec::AwsAccessKey {
+                access_key_id,
+                secret_access_key,
+                session_token,
+                ..
+            } => aws_refs(access_key_id, secret_access_key, session_token),
             OriginSpec::External { secrets, .. } => secrets.values().map(String::as_str).collect(),
             OriginSpec::Command { .. } => vec![],
         }
     }
+
+    /// A field of the same record that a rotation fills with the new key's
+    /// provider id (the AWS access key id), with its own destinations.
+    pub fn id_field(&self) -> Option<&str> {
+        match self {
+            OriginSpec::AwsAccessKey { id_field, .. } => id_field.as_deref(),
+            _ => None,
+        }
+    }
+}
+
+fn aws_refs<'a>(
+    access_key_id: &'a str,
+    secret_access_key: &'a str,
+    session_token: &'a Option<String>,
+) -> Vec<&'a str> {
+    let mut out = vec![access_key_id, secret_access_key];
+    out.extend(session_token.as_deref());
+    out
 }
 
 impl DestSpec {
@@ -272,6 +397,19 @@ impl DestSpec {
                 target,
                 ..
             } => format!("Vercel project {project}: {key} ({target})"),
+            DestSpec::Gitlab {
+                project,
+                key,
+                environment_scope,
+                ..
+            } => format!("GitLab project {project}: {key} ({environment_scope})"),
+            DestSpec::Fly { app, name, .. } => format!("Fly app {app}: secret {name}"),
+            DestSpec::AwsSecret {
+                secret_id, region, ..
+            } => format!("AWS Secrets Manager ({region}): {secret_id}"),
+            DestSpec::AwsParameter { name, region, .. } => {
+                format!("AWS Parameter Store ({region}): {name}")
+            }
             DestSpec::Dotenv { file, key } => format!("{} ({key})", file.display()),
             DestSpec::Ssh {
                 host, file, key, ..
@@ -287,7 +425,21 @@ impl DestSpec {
             DestSpec::SupabaseSecret { token, .. }
             | DestSpec::CloudflareWorker { token, .. }
             | DestSpec::Netlify { token, .. }
-            | DestSpec::Vercel { token, .. } => vec![token.as_str()],
+            | DestSpec::Vercel { token, .. }
+            | DestSpec::Gitlab { token, .. }
+            | DestSpec::Fly { token, .. } => vec![token.as_str()],
+            DestSpec::AwsSecret {
+                access_key_id,
+                secret_access_key,
+                session_token,
+                ..
+            }
+            | DestSpec::AwsParameter {
+                access_key_id,
+                secret_access_key,
+                session_token,
+                ..
+            } => aws_refs(access_key_id, secret_access_key, session_token),
             DestSpec::External { secrets, .. } => secrets.values().map(String::as_str).collect(),
             DestSpec::Dotenv { .. } | DestSpec::Ssh { .. } | DestSpec::Command { .. } => vec![],
         }
@@ -351,6 +503,49 @@ impl DestSpec {
                 ..
             } => {
                 vercel::validate(project, key, target, team.as_deref())?;
+                check_api(api_url)?;
+            }
+            DestSpec::Gitlab {
+                project,
+                key,
+                environment_scope,
+                masked,
+                hidden,
+                api_url,
+                ..
+            } => {
+                gitlab::validate(project, key, environment_scope)?;
+                if *hidden && !*masked {
+                    bail!("hidden GitLab variables are always masked: drop --no-mask");
+                }
+                check_api(api_url)?;
+            }
+            DestSpec::Fly {
+                app, name, api_url, ..
+            } => {
+                fly::validate(app, name)?;
+                check_api(api_url)?;
+            }
+            DestSpec::AwsSecret {
+                secret_id,
+                region,
+                kms_key,
+                api_url,
+                ..
+            } => {
+                aws::validate_region(region)?;
+                aws_secrets::validate(secret_id, kms_key.as_deref())?;
+                check_api(api_url)?;
+            }
+            DestSpec::AwsParameter {
+                name,
+                region,
+                kms_key,
+                api_url,
+                ..
+            } => {
+                aws::validate_region(region)?;
+                aws_ssm::validate(name, kms_key.as_deref())?;
                 check_api(api_url)?;
             }
             DestSpec::Dotenv { file, key } => {
@@ -422,6 +617,30 @@ impl OriginSpec {
                 resend::validate_permission(permission, domain.as_deref())?;
                 check_api(api_url)?;
             }
+            OriginSpec::AwsAccessKey {
+                user,
+                id_field,
+                api_url,
+                ..
+            } => {
+                if let Some(u) = user {
+                    aws_iam::validate_user(u)?;
+                }
+                if let Some(f) = id_field {
+                    crate::model::validate_name(f, "field")?;
+                }
+                check_api(api_url)?;
+            }
+            OriginSpec::OpenaiKey {
+                project,
+                service_account,
+                name,
+                api_url,
+                ..
+            } => {
+                openai::validate(project, service_account, name)?;
+                check_api(api_url)?;
+            }
             OriginSpec::Command { command } => {
                 if command.is_empty() {
                     bail!("give the command after --");
@@ -447,6 +666,21 @@ fn credential(ws: &mut Workspace, reference: &str, env: Option<&str>) -> Result<
         .with_context(|| format!("cannot read the credential {reference}"))?;
     let text = v.text()?;
     Ok(Zeroizing::new(text.trim().to_string()))
+}
+
+/// Resolves the references of AWS credentials.
+fn aws_credentials(
+    ws: &mut Workspace,
+    access_key_id: &str,
+    secret_access_key: &str,
+    session_token: Option<&str>,
+    env: Option<&str>,
+) -> Result<aws::Credentials> {
+    Ok(aws::Credentials {
+        access_key_id: credential(ws, access_key_id, env)?,
+        secret_access_key: credential(ws, secret_access_key, env)?,
+        session_token: session_token.map(|t| credential(ws, t, env)).transpose()?,
+    })
 }
 
 fn resolve_secrets(
@@ -511,6 +745,33 @@ pub fn create(
                 domain.as_deref(),
             )
         }
+        OriginSpec::AwsAccessKey {
+            user,
+            access_key_id,
+            secret_access_key,
+            session_token,
+            api_url,
+            ..
+        } => {
+            let creds = aws_credentials(
+                ws,
+                access_key_id,
+                secret_access_key,
+                session_token.as_deref(),
+                env,
+            )?;
+            aws_iam::create_key(api_url.as_deref(), &creds, user.as_deref())
+        }
+        OriginSpec::OpenaiKey {
+            project,
+            service_account,
+            token,
+            name,
+            api_url,
+        } => {
+            let token = credential(ws, token, env)?;
+            openai::create_key(api_url.as_deref(), &token, project, service_account, name)
+        }
         OriginSpec::Command { command } => command::origin_create(command),
         OriginSpec::External {
             name,
@@ -574,6 +835,48 @@ pub fn revoke(
             resend::delete_key(api_url.as_deref(), &token, id)?;
             Ok(Revoked::Done)
         }
+        OriginSpec::AwsAccessKey {
+            user,
+            access_key_id,
+            secret_access_key,
+            session_token,
+            api_url,
+            ..
+        } => {
+            let Some(id) = provider_id else {
+                return Ok(Revoked::Manual(format!(
+                    "Cemí did not create this key, so it does not know its access key id. Delete it in the IAM console ({}, Security credentials); with --id-field, Cemí reads the id of the key in use from that field.",
+                    match user {
+                        Some(u) => format!("user {u}"),
+                        None => "the user of the signing key".into(),
+                    }
+                )));
+            };
+            let creds = aws_credentials(
+                ws,
+                access_key_id,
+                secret_access_key,
+                session_token.as_deref(),
+                env,
+            )?;
+            aws_iam::delete_key(api_url.as_deref(), &creds, user.as_deref(), id)?;
+            Ok(Revoked::Done)
+        }
+        OriginSpec::OpenaiKey {
+            project,
+            token,
+            api_url,
+            ..
+        } => {
+            let Some(id) = provider_id else {
+                return Ok(Revoked::Manual(format!(
+                    "Cemí did not create this key, so it does not know its id. Delete it in the OpenAI dashboard (project {project}, API keys)."
+                )));
+            };
+            let token = credential(ws, token, env)?;
+            openai::delete_key(api_url.as_deref(), &token, project, id)?;
+            Ok(Revoked::Done)
+        }
         OriginSpec::Command { command } => command::origin_revoke(command, old_value, compromised),
         OriginSpec::External {
             name,
@@ -627,6 +930,38 @@ pub fn origin_state(
         (OriginSpec::ResendKey { token, api_url, .. }, Some(id)) => {
             let token = credential(ws, token, env)?;
             resend::key_state(api_url.as_deref(), &token, id)
+        }
+        (
+            OriginSpec::AwsAccessKey {
+                user,
+                access_key_id,
+                secret_access_key,
+                session_token,
+                api_url,
+                ..
+            },
+            Some(id),
+        ) => {
+            let creds = aws_credentials(
+                ws,
+                access_key_id,
+                secret_access_key,
+                session_token.as_deref(),
+                env,
+            )?;
+            aws_iam::key_state(api_url.as_deref(), &creds, user.as_deref(), id)
+        }
+        (
+            OriginSpec::OpenaiKey {
+                project,
+                token,
+                api_url,
+                ..
+            },
+            Some(id),
+        ) => {
+            let token = credential(ws, token, env)?;
+            openai::key_state(api_url.as_deref(), &token, project, id)
         }
         _ => Ok(OriginState::Unknown),
     }
@@ -715,6 +1050,90 @@ pub fn write(spec: &DestSpec, ws: &mut Workspace, env: Option<&str>, value: &[u8
                 team.as_deref(),
                 key,
                 target,
+                text(value)?,
+            )
+        }
+        DestSpec::Gitlab {
+            project,
+            key,
+            environment_scope,
+            masked,
+            protected,
+            hidden,
+            token,
+            api_url,
+        } => {
+            let token = credential(ws, token, env)?;
+            gitlab::set_var(
+                api_url.as_deref(),
+                &token,
+                project,
+                key,
+                &gitlab::Options {
+                    scope: environment_scope,
+                    masked: *masked,
+                    protected: *protected,
+                    hidden: *hidden,
+                },
+                text(value)?,
+            )
+        }
+        DestSpec::Fly {
+            app,
+            name,
+            token,
+            api_url,
+        } => {
+            let token = credential(ws, token, env)?;
+            fly::set_secret(api_url.as_deref(), &token, app, name, text(value)?)
+        }
+        DestSpec::AwsSecret {
+            secret_id,
+            region,
+            kms_key,
+            access_key_id,
+            secret_access_key,
+            session_token,
+            api_url,
+        } => {
+            let creds = aws_credentials(
+                ws,
+                access_key_id,
+                secret_access_key,
+                session_token.as_deref(),
+                env,
+            )?;
+            aws_secrets::put(
+                api_url.as_deref(),
+                &creds,
+                region,
+                secret_id,
+                kms_key.as_deref(),
+                text(value)?,
+            )
+        }
+        DestSpec::AwsParameter {
+            name,
+            region,
+            kms_key,
+            access_key_id,
+            secret_access_key,
+            session_token,
+            api_url,
+        } => {
+            let creds = aws_credentials(
+                ws,
+                access_key_id,
+                secret_access_key,
+                session_token.as_deref(),
+                env,
+            )?;
+            aws_ssm::put(
+                api_url.as_deref(),
+                &creds,
+                region,
+                name,
+                kms_key.as_deref(),
                 text(value)?,
             )
         }
@@ -824,6 +1243,62 @@ pub fn observe(spec: &DestSpec, ws: &mut Workspace, env: Option<&str>) -> Result
                 target,
             )
         }
+        DestSpec::Gitlab {
+            project,
+            key,
+            environment_scope,
+            token,
+            api_url,
+            ..
+        } => {
+            let token = credential(ws, token, env)?;
+            gitlab::observe(api_url.as_deref(), &token, project, key, environment_scope)
+        }
+        DestSpec::Fly {
+            app,
+            name,
+            token,
+            api_url,
+        } => {
+            let token = credential(ws, token, env)?;
+            fly::observe(api_url.as_deref(), &token, app, name)
+        }
+        DestSpec::AwsSecret {
+            secret_id,
+            region,
+            access_key_id,
+            secret_access_key,
+            session_token,
+            api_url,
+            ..
+        } => {
+            let creds = aws_credentials(
+                ws,
+                access_key_id,
+                secret_access_key,
+                session_token.as_deref(),
+                env,
+            )?;
+            aws_secrets::observe(api_url.as_deref(), &creds, region, secret_id)
+        }
+        DestSpec::AwsParameter {
+            name,
+            region,
+            access_key_id,
+            secret_access_key,
+            session_token,
+            api_url,
+            ..
+        } => {
+            let creds = aws_credentials(
+                ws,
+                access_key_id,
+                secret_access_key,
+                session_token.as_deref(),
+                env,
+            )?;
+            aws_ssm::observe(api_url.as_deref(), &creds, region, name)
+        }
         DestSpec::Dotenv { file, key } => observe_dotenv(file, key),
         DestSpec::Ssh {
             host,
@@ -867,7 +1342,13 @@ pub fn describe_change(spec: &DestSpec, marker: &str) -> String {
             Some(at) => format!("updated {}", crate::ui::when(at, "%Y-%m-%d %H:%M")),
             None => marker.to_string(),
         },
-        DestSpec::SupabaseSecret { .. } => "its digest changed".into(),
+        DestSpec::SupabaseSecret { .. } | DestSpec::Fly { .. } => "its digest changed".into(),
+        DestSpec::AwsSecret { .. } => "it has a new current version (AWSCURRENT)".into(),
+        DestSpec::AwsParameter { .. } => match marker.strip_prefix("version ") {
+            Some(v) => format!("it is now at version {v}"),
+            None => marker.to_string(),
+        },
+        DestSpec::Gitlab { .. } => "it has another value".into(),
         DestSpec::Dotenv { .. } | DestSpec::Ssh { .. } => "the file has another value".into(),
         DestSpec::CloudflareWorker { .. }
         | DestSpec::Command { .. }

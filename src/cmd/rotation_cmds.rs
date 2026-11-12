@@ -169,6 +169,43 @@ pub fn origin(ctx: &mut Ctx, cmd: OriginCmd) -> Result<i32> {
                     domain,
                     api_url,
                 },
+                OriginKind::AwsAccessKey {
+                    user,
+                    access_key_id,
+                    secret_access_key,
+                    session_token,
+                    id_field,
+                    api_url,
+                } => {
+                    if id_field.as_deref() == Some(fr.field.as_str()) {
+                        bail!(
+                            "--id-field names another field of the record, for the access key id; {r} holds the secret access key"
+                        );
+                    }
+                    OriginSpec::AwsAccessKey {
+                        user,
+                        access_key_id: credential_ref(ctx, &access_key_id, fr.scope)?,
+                        secret_access_key: credential_ref(ctx, &secret_access_key, fr.scope)?,
+                        session_token: session_token
+                            .map(|t| credential_ref(ctx, &t, fr.scope))
+                            .transpose()?,
+                        id_field,
+                        api_url,
+                    }
+                }
+                OriginKind::OpenaiKey {
+                    project,
+                    service_account,
+                    token,
+                    name,
+                    api_url,
+                } => OriginSpec::OpenaiKey {
+                    project,
+                    service_account,
+                    token: credential_ref(ctx, &token, fr.scope)?,
+                    name,
+                    api_url,
+                },
                 OriginKind::Command { command } => OriginSpec::Command { command },
                 OriginKind::External { name, set, secret } => OriginSpec::External {
                     name,
@@ -293,6 +330,74 @@ pub fn dest(ctx: &mut Ctx, cmd: DestCmd) -> Result<i32> {
                     target,
                     team,
                     token: credential_ref(ctx, &token, fr.scope)?,
+                    api_url,
+                },
+                DestKind::Gitlab {
+                    project,
+                    key,
+                    environment_scope,
+                    protected,
+                    no_mask,
+                    hidden,
+                    token,
+                    api_url,
+                } => DestSpec::Gitlab {
+                    project,
+                    key,
+                    environment_scope,
+                    masked: !no_mask,
+                    protected,
+                    hidden,
+                    token: credential_ref(ctx, &token, fr.scope)?,
+                    api_url,
+                },
+                DestKind::Fly {
+                    app,
+                    name,
+                    token,
+                    api_url,
+                } => DestSpec::Fly {
+                    app,
+                    name,
+                    token: credential_ref(ctx, &token, fr.scope)?,
+                    api_url,
+                },
+                DestKind::AwsSecret {
+                    secret_id,
+                    region,
+                    kms_key,
+                    access_key_id,
+                    secret_access_key,
+                    session_token,
+                    api_url,
+                } => DestSpec::AwsSecret {
+                    secret_id,
+                    region,
+                    kms_key,
+                    access_key_id: credential_ref(ctx, &access_key_id, fr.scope)?,
+                    secret_access_key: credential_ref(ctx, &secret_access_key, fr.scope)?,
+                    session_token: session_token
+                        .map(|t| credential_ref(ctx, &t, fr.scope))
+                        .transpose()?,
+                    api_url,
+                },
+                DestKind::AwsParameter {
+                    name,
+                    region,
+                    kms_key,
+                    access_key_id,
+                    secret_access_key,
+                    session_token,
+                    api_url,
+                } => DestSpec::AwsParameter {
+                    name,
+                    region,
+                    kms_key,
+                    access_key_id: credential_ref(ctx, &access_key_id, fr.scope)?,
+                    secret_access_key: credential_ref(ctx, &secret_access_key, fr.scope)?,
+                    session_token: session_token
+                        .map(|t| credential_ref(ctx, &t, fr.scope))
+                        .transpose()?,
                     api_url,
                 },
                 DestKind::Dotenv { file, key } => {

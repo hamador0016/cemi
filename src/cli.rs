@@ -719,6 +719,43 @@ pub enum OriginKind {
         #[arg(long, hide = true)]
         api_url: Option<String>,
     },
+    /// (beta) An AWS IAM access key: the value is the secret access key; the access key id can go to another field
+    AwsAccessKey {
+        /// IAM user that owns the keys (default: the user of the signing key)
+        #[arg(long)]
+        user: Option<String>,
+        /// record#field with the access key id that signs the requests
+        #[arg(long)]
+        access_key_id: String,
+        /// record#field with its secret access key
+        #[arg(long)]
+        secret_access_key: String,
+        /// record#field with a session token, for temporary credentials
+        #[arg(long)]
+        session_token: Option<String>,
+        /// Field of the same record that gets each new access key id (and sends it to its destinations)
+        #[arg(long)]
+        id_field: Option<String>,
+        #[arg(long, hide = true)]
+        api_url: Option<String>,
+    },
+    /// (beta) An OpenAI API key of a project service account, through the Admin API
+    OpenaiKey {
+        /// Project id (proj_…)
+        #[arg(long)]
+        project: String,
+        /// Service account id (Project settings → Service accounts)
+        #[arg(long)]
+        service_account: String,
+        /// record#field with an OpenAI Admin API key
+        #[arg(long)]
+        token: String,
+        /// Base name for the keys; Cemí adds the date
+        #[arg(long, default_value = "cemi")]
+        name: String,
+        #[arg(long, hide = true)]
+        api_url: Option<String>,
+    },
     /// Your program: `COMMAND create` prints a new value, `COMMAND revoke` gets the old one on stdin
     Command {
         #[arg(trailing_var_arg = true, required = true, value_name = "COMMAND")]
@@ -849,6 +886,93 @@ pub enum DestKind {
         /// record#field with a Vercel access token
         #[arg(long)]
         token: String,
+        #[arg(long, hide = true)]
+        api_url: Option<String>,
+    },
+    /// (beta) A GitLab CI/CD variable of a project (masked by default)
+    Gitlab {
+        /// Project id or path (acme/shop)
+        #[arg(long)]
+        project: String,
+        /// Variable name
+        #[arg(long)]
+        key: String,
+        /// Environment scope (* for every environment)
+        #[arg(long, default_value = "*")]
+        environment_scope: String,
+        /// Only for protected branches and tags
+        #[arg(long)]
+        protected: bool,
+        /// Do not mask it in job logs (needed for values shorter than 8 characters or with spaces)
+        #[arg(long)]
+        no_mask: bool,
+        /// Create it masked and hidden: never shown again, not even to Cemí (changes made outside Cemí cannot be noticed)
+        #[arg(long)]
+        hidden: bool,
+        /// record#field with a GitLab access token (api scope)
+        #[arg(long)]
+        token: String,
+        /// For self-managed GitLab: https://HOST/api/v4
+        #[arg(long)]
+        api_url: Option<String>,
+    },
+    /// (beta) A Fly.io app secret (Machines see it after `fly secrets deploy` or a deploy)
+    Fly {
+        /// App name
+        #[arg(long)]
+        app: String,
+        /// Secret name
+        #[arg(long)]
+        name: String,
+        /// record#field with a Fly.io token (fly tokens create deploy)
+        #[arg(long)]
+        token: String,
+        #[arg(long, hide = true)]
+        api_url: Option<String>,
+    },
+    /// (beta) An AWS Secrets Manager secret (created if it does not exist)
+    AwsSecret {
+        /// Secret name or ARN
+        #[arg(long)]
+        secret_id: String,
+        /// AWS region, like us-east-1
+        #[arg(long)]
+        region: String,
+        /// KMS key for a secret Cemí creates (default: aws/secretsmanager)
+        #[arg(long)]
+        kms_key: Option<String>,
+        /// record#field with the access key id that signs the requests
+        #[arg(long)]
+        access_key_id: String,
+        /// record#field with its secret access key
+        #[arg(long)]
+        secret_access_key: String,
+        /// record#field with a session token, for temporary credentials
+        #[arg(long)]
+        session_token: Option<String>,
+        #[arg(long, hide = true)]
+        api_url: Option<String>,
+    },
+    /// (beta) An AWS Systems Manager Parameter Store parameter, as a SecureString
+    AwsParameter {
+        /// Parameter name, like /shop/prod/stripe-key
+        #[arg(long)]
+        name: String,
+        /// AWS region, like us-east-1
+        #[arg(long)]
+        region: String,
+        /// KMS key (default: the account's aws/ssm key)
+        #[arg(long)]
+        kms_key: Option<String>,
+        /// record#field with the access key id that signs the requests
+        #[arg(long)]
+        access_key_id: String,
+        /// record#field with its secret access key
+        #[arg(long)]
+        secret_access_key: String,
+        /// record#field with a session token, for temporary credentials
+        #[arg(long)]
+        session_token: Option<String>,
         #[arg(long, hide = true)]
         api_url: Option<String>,
     },
