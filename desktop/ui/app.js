@@ -474,6 +474,7 @@ function renderNav() {
     b.type = 'button';
     b.appendChild(icon(ic, 16));
     b.appendChild(el('span', 'label', T[key]));
+    b.setAttribute('aria-label', active ? T[key] : `${T[key]} · ${T.comingSoon}`);
     if (active) b.setAttribute('aria-current', 'page');
     else {
       b.disabled = true;
@@ -508,11 +509,14 @@ function renderTree() {
     if (!isVisible(e)) continue;
     const row = el('div', 'tree-item' + (e.id === state.entity ? ' selected' : ''));
     row.setAttribute('role', 'treeitem');
+    row.setAttribute('aria-label', entityLabel(e));
+    row.setAttribute('aria-selected', String(e.id === state.entity));
     row.tabIndex = 0;
     row.style.paddingLeft = `${6 + e.depth * 14}px`;
     const chev = el('button', 'tree-chev', e.hasChildren ? (state.expanded.has(e.id) ? '▾' : '▸') : '');
     chev.type = 'button';
     chev.tabIndex = -1;
+    chev.setAttribute('aria-hidden', 'true');
     if (e.hasChildren) {
       row.setAttribute('aria-expanded', String(state.expanded.has(e.id)));
       chev.addEventListener('click', (ev) => {
