@@ -449,6 +449,10 @@ pub fn run(cli: Cli) -> Result<i32> {
         C::Import {
             path,
             discover,
+            from,
+            project,
+            config,
+            vault,
             into,
             env,
             plain,
@@ -456,7 +460,22 @@ pub fn run(cli: Cli) -> Result<i32> {
             depth,
             yes,
         } => {
-            if discover {
+            if let Some(source) = from {
+                project_cmds::import_from(
+                    &mut ctx,
+                    source,
+                    project_cmds::FromOptions {
+                        project: project.as_deref(),
+                        config: config.as_deref(),
+                        vault: vault.as_deref(),
+                        into: into.as_deref(),
+                        env: env.as_deref(),
+                        plain: &plain,
+                        no_link,
+                        yes,
+                    },
+                )
+            } else if discover {
                 let root = path.unwrap_or_else(|| ctx.ws.cwd.clone());
                 project_cmds::discover(
                     &mut ctx,

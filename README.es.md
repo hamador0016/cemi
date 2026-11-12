@@ -198,6 +198,23 @@ nombre del archivo: `.env` vale para todos, y `.env.<ambiente>` y `.env.local` l
 sobrescriben, igual que los leen la mayoría de las herramientas. Después, `cemi run -e dev --
 <tu comando>` en cada carpeta, y los `.env` se pueden borrar.
 
+Desde otro gestor de secretos, con su propio programa de línea de comandos y tu sesión en él
+(Cemí nunca pide su token de API):
+
+```bash
+doppler login && cemi import --from doppler --project shop --config dev -e dev
+op signin && cemi import --from 1password --vault Work
+```
+
+Los dos muestran lo que encontraron (nombres, nunca valores) y preguntan antes; `--yes` se salta
+la pregunta. Las variables de Doppler se importan como un `.env`: un registro por variable,
+agregado a `cemi.toml`, con `--into`, `-e` y `--plain`. Cada elemento de 1Password pasa a ser un
+registro en la entidad con el nombre de la bóveda (o `--into`), y sus campos pasan a ser campos:
+los ocultos, las contraseñas, los códigos de un solo uso y las notas son secretos; los de texto,
+correo, teléfono, fecha y URL no; el sitio web queda en un campo `website`. Los adjuntos y los
+documentos no se importan, y la vista previa dice cuántos se saltaron. Los valores se leen de la
+salida del programa, nunca se pasan como argumentos.
+
 ## Tipos para tus variables
 
 ```bash
@@ -214,6 +231,29 @@ Salen solo de `cemi.toml`, así que son iguales en cualquier computadora y en CI
 cemi token create claude --allow read --allow run --env dev --expires 7d
 cemi mcp setup claude-code --token-name claude
 ```
+
+`cemi mcp setup` también conoce `claude-desktop`, `cursor`, `vscode` (GitHub Copilot),
+`windsurf`, `devin`, `zed`, `codex` (OpenAI Codex CLI) y `gemini` (Gemini CLI). Agrega un
+servidor llamado `cemi` a la configuración del cliente y deja igual los demás servidores y
+ajustes del archivo; la entrada no lleva ningún secreto, solo el comando
+`cemi mcp serve --token-name claude`.
+
+| Cliente | Bóveda del proyecto | Bóveda global (`cemi --global mcp setup …`) |
+|---|---|---|
+| `claude-code` | corre `claude mcp add --scope project` | corre `claude mcp add --scope user` |
+| `claude-desktop` | — | `claude_desktop_config.json` en la carpeta de Claude |
+| `cursor` | `.cursor/mcp.json` | `~/.cursor/mcp.json` |
+| `vscode` | `.mcp.json` | `~/.copilot/mcp-config.json` (o `$COPILOT_HOME`) |
+| `windsurf` | — | `~/.codeium/windsurf/mcp_config.json` |
+| `devin` | `.devin/mcp_config.json` | `devin/mcp_config.json` en la carpeta de configuración |
+| `zed` | `.zed/settings.json` | el `settings.json` de Zed |
+| `codex` | `.codex/config.toml` (proyectos de confianza) | `~/.codex/config.toml` (o `$CODEX_HOME`) |
+| `gemini` | `.gemini/settings.json` | `~/.gemini/settings.json` |
+
+Claude Desktop y Windsurf no tienen configuración por proyecto, así que usan la bóveda global.
+Un archivo que no es JSON puro (Zed y otros aceptan comentarios) queda como estaba, y Cemí
+muestra lo que hay que agregar. `--print` solo lo muestra, para cualquier cliente; `other`
+muestra un fragmento `mcpServers` genérico. El cliente encuentra `cemi` en su `PATH`.
 
 Y en `cemi.toml`, lo que la IA puede correr:
 

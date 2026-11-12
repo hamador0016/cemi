@@ -259,19 +259,35 @@ pub enum Cmd {
         #[arg(short, long)]
         output: Option<std::path::PathBuf>,
     },
-    /// Import a .env file (one record per variable), or find the .env files of all your projects
-    #[command(after_help = "Examples:\n  \
-        cemi import .env -e dev\n  \
-        cemi import --discover ~/code          # show what it finds, then ask\n  \
-        cemi import --discover ~/code --yes    # import without asking")]
+    /// Import a .env file (one record per variable), find the .env files of all your projects, or import from Doppler or 1Password
+    #[command(after_help = "Examples:
+          cemi import .env -e dev
+          cemi import --discover ~/code          # show what it finds, then ask
+          cemi import --discover ~/code --yes    # import without asking
+          cemi import --from doppler --project shop --config dev -e dev
+          cemi import --from 1password --vault Work --into accounts
+
+        --from uses the program of each secret manager (`doppler`, `op`) and its session:         sign in with `doppler login` or `op signin` first. Values are read from its output, never passed as arguments.")]
     Import {
         /// The .env file; with --discover, the folder to search (default: this one)
-        #[arg(value_name = "PATH", required_unless_present = "discover")]
+        #[arg(value_name = "PATH", required_unless_present_any = ["discover", "from"], conflicts_with = "from")]
         path: Option<std::path::PathBuf>,
         /// Find .env files in every project under PATH, warn about the risky ones and import them
-        #[arg(long)]
+        #[arg(long, conflicts_with = "from")]
         discover: bool,
-        /// Entity to put the records in (with --discover: one entity per project inside it)
+        /// Import from another secret manager through its command-line program
+        #[arg(long, value_enum, value_name = "SOURCE")]
+        from: Option<ImportSource>,
+        /// With --from doppler: the Doppler project (default: the one set up for this folder)
+        #[arg(long, requires = "from")]
+        project: Option<String>,
+        /// With --from doppler: the Doppler config, like dev or prd (default: the one set up for this folder)
+        #[arg(long, requires = "from")]
+        config: Option<String>,
+        /// With --from 1password: the 1Password vault to import
+        #[arg(long, requires = "from")]
+        vault: Option<String>,
+        /// Entity to put the records in (with --discover: one entity per project inside it; with --from 1password: default, the vault's name)
         #[arg(long, add = ArgValueCompleter::new(crate::complete::entities))]
         into: Option<String>,
         /// Environment, like dev or prod (default: the value shared by all; with --discover, guessed from each file name)
@@ -286,8 +302,8 @@ pub enum Cmd {
         /// With --discover: how many folders deep to look
         #[arg(long, default_value_t = 5, requires = "discover")]
         depth: usize,
-        /// With --discover: import without asking
-        #[arg(short, long, requires = "discover")]
+        /// With --discover or --from: import without asking
+        #[arg(short, long)]
         yes: bool,
     },
 
@@ -1108,6 +1124,16 @@ pub enum TokenCmd {
     },
 }
 
+/// Secret managers `cemi import --from` reads.
+#[derive(Clone, Copy, PartialEq, Eq, clap::ValueEnum)]
+pub enum ImportSource {
+    /// Doppler, through the `doppler` program
+    Doppler,
+    /// 1Password, through the `op` program
+    #[value(name = "1password")]
+    OnePassword,
+}
+
 #[derive(Subcommand)]
 pub enum McpCmd {
     /// Run the Cemí MCP server on standard input/output
@@ -1116,12 +1142,23 @@ pub enum McpCmd {
         #[arg(long)]
         token_name: Option<String>,
     },
-    /// Connect an AI client to Cemí
+    /// Connect an AI client to Cemí: adds the server "cemi" to the client's configuration
+    #[command(
+        after_help = "With a project vault, the client's project file is written in the project folder         (.cursor/mcp.json, .mcp.json for VS Code, .zed/settings.json, .codex/config.toml, .gemini/settings.json,         .devin/mcp_config.json); with --global, the client's file for every project.         Claude Desktop and Windsurf only have the second. Other servers and settings in the file are kept.         `other` prints a generic snippet.
+
+        Examples:
+          cemi mcp setup cursor --token-name claude
+          cemi --global mcp setup claude-desktop --token-name claude
+          cemi mcp setup zed --token-name claude --print    # only show what to add"
+    )]
     Setup {
-        /// claude-code, claude-desktop, cursor or other
+        #[arg(value_parser = clap::builder::PossibleValuesParser::new(crate::mcp_clients::CLIENT_NAMES))]
         client: String,
         #[arg(long)]
         token_name: String,
+        /// Only print what to add to the client's configuration; change nothing
+        #[arg(long)]
+        print: bool,
     },
     /// Register another MCP server with keys injected: cemi mcp add supabase --env TOKEN=cuentas/supabase#token -- npx -y @supabase/mcp-server-supabase
     Add {
