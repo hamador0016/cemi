@@ -1,11 +1,25 @@
 [package]
 name = "cemi"
-version = "0.2.0"
+version = "0.5.0"
 edition = "2024"
 rust-version = "1.89"
 description = "Secrets with memory that your AI can use without seeing"
 license = "Apache-2.0"
 readme = "README.md"
+repository = "https://github.com/hamador0016/cemi"
+homepage = "https://github.com/hamador0016/cemi"
+# Only what builds and documents cemi goes to crates.io.
+include = [
+    "/src/**/*",
+    "/presets/**/*",
+    "/docs/**/*",
+    "/Cargo.toml",
+    "/Cargo.lock",
+    "/LICENSE",
+    "/README.md",
+    "/README.es.md",
+    "/SECURITY.md",
+]
 keywords = ["secrets", "vault", "mcp", "age", "env"]
 categories = ["command-line-utilities", "cryptography"]
 

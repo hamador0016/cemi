@@ -9,6 +9,9 @@ privado/
 *.pem
 *.key
 *.age
+# Vaults made by older versions, for the compatibility tests (test values only)
+!tests/fixtures/**/*.age
 
 # Rust
 target/
+target-old/

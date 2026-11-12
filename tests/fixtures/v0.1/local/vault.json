@@ -1,0 +1,19 @@
+{
+  "cemi_vault": 1,
+  "id": "89c5b0afe4feac2d5e1991d190117731",
+  "scope": "local",
+  "created": "2026-11-12T01:47:13.0931906Z",
+  "recipient": "age1nuw2mxh5skl436klxxnl7zlva0acg4kt2maq24vzqwa0c7nn6aessw5y7l",
+  "kdf": {
+    "memory_kib": 64,
+    "iterations": 1,
+    "parallelism": 1
+  },
+  "salt": "XyVuAg2+0y8G4mKrKxuyWA==",
+  "password": null,
+  "recovery": null,
+  "global": {
+    "vault_id": "a2a3d7460101b8294ce7757491889e6f",
+    "ciphertext": "YWdlLWVuY3J5cHRpb24ub3JnL3YxCi0+IFgyNTUxOSBVcXNScXYvNlVHblRiYUJZM0V5SEp6WTJjRTBoNGNmT0U5YkM0QzBRSVF3CkpDbjFSWEoxSWhQS0xGeTFEY0dCRXJieGJUQ3VWaVVmY0Y3Mm1XNjJxUzAKLT4gZiItZ3JlYXNlIEJvUnVSIC13UkEgYFErCkVHbUFEQmRlVHM1Wk9VckxtQ3N6eFB6NzlCS2J3a1FxVDk4QlVON3oyb3R0VUl2NHRrb0k1VTFIL3dFSVRrcGMKNkk2TE1GR05EbnJmcVEKLS0tIGtEaU9LUXRDemMyN2NqUU1kYVFPMWlIaHgyQlFiMzZadS90THFHWDBDMzgKelo4pOyj41np6NvSiwAw+l11zmTq/7swqOzIHaiRTY6Y3MSProIhrVX1OFSRchcLIoDoWF7eKnjvQnn13lb/C9FKC2ckcqI2Q7bZ6n9Sg81f8Ww00bkE5DMEmtnzgqCnpikBAs4+ds8CgQ=="
+  }
+}

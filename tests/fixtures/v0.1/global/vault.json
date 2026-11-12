@@ -1,0 +1,22 @@
+{
+  "cemi_vault": 1,
+  "id": "a2a3d7460101b8294ce7757491889e6f",
+  "scope": "global",
+  "created": "2026-11-12T01:47:12.4666629Z",
+  "recipient": "age1gsm5h2fptfu40tynulczaamagatzr6fg9ecyc6xc3ka6480wfges7579g6",
+  "kdf": {
+    "memory_kib": 64,
+    "iterations": 1,
+    "parallelism": 1
+  },
+  "salt": "5Quts1S0b7qrn/v09OVCYw==",
+  "password": {
+    "nonce": "QP/uURETjb6OuHdpY5XL6eUZQFXkCaQL",
+    "ciphertext": "j3rsXZpxgTQTW3BzlDqBK9AgIP97YlOQJcd5vEvUEEx0ms+ZaoS/s0Iu2wsS/aP9VoaaeTLBeNKFq+M+mlGJ/nONvtzTj8ubW3KK69xyuwJpn1WlkSJ4Lf7U"
+  },
+  "recovery": {
+    "nonce": "Jw7GshvC0TT64rqV1Wu0ak7Qh/WNDVb+",
+    "ciphertext": "8yOvyan17e2ZW9HXGmRbzlZK7UK23+Cft6IUgrgqB/SZyyLgEHjNY4rq0xP9ny1YtJ8euWzX4yCI+fyM4WoThFaKGK+6CcohJY96XhM5IX9LUEUrt77cxHwb"
+  },
+  "global": null
+}

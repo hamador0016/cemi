@@ -358,7 +358,7 @@ dependencies = [
 
 [[package]]
 name = "cemi"
-version = "0.2.0"
+version = "0.5.0"
 dependencies = [
  "age",
  "aho-corasick",

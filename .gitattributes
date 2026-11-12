@@ -1,0 +1,2 @@
+# Vault files made by older versions: exact bytes, never line-ending changes
+tests/fixtures/** -text

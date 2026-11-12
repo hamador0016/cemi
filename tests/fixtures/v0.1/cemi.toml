@@ -1,0 +1,12 @@
+# Cemí project file: which secrets this project needs, as references.
+# It never contains values, so it is safe to commit.
+vault = "local"
+
+[env]
+DB_PASSWORD = "db#password"
+# DATABASE_URL = "db#url"
+
+[files]
+
+[ai.commands]
+# test = { cmd = ["npm", "test"], envs = ["dev"] }
