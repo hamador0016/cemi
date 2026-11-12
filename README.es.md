@@ -6,6 +6,8 @@
 
 [English](README.md)
 
+<p align="center"><img src="assets/demo.gif" alt="Importar un .env a Cemí, correr un proyecto con sus claves inyectadas y ocultas en la salida, y cemi status" width="800"></p>
+
 Cemí guarda tus API keys, tokens y contraseñas cifrados en tu computadora, junto con para qué
 sirve cada uno, dónde se usa y cómo reemplazarlo. Tus proyectos corren con ellos inyectados, y
 los asistentes de IA (Claude, ChatGPT, Cursor… por MCP) pueden usarlos sin recibir nunca los
@@ -13,7 +15,7 @@ valores.
 
 *El nombre viene del cemí taíno, una figura tallada que protegía lo que su dueño valoraba.*
 
-> **Estado: v0.2, temprana.** El formato y los comandos todavía pueden cambiar. Lee
+> **Estado: v0.5, temprana.** El formato y los comandos todavía pueden cambiar. Lee
 > [docs/threat-model.md](docs/threat-model.md) antes de confiarle secretos de producción.
 
 ## Por qué
