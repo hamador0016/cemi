@@ -27,8 +27,8 @@ use zeroize::Zeroizing;
 
 use crate::crypto::{self, AgeKey, KdfParams, Sealed};
 use crate::model::{
-    Approval, DEFAULT_PROTECTED, Entity, Envelope, KnownProject, Launcher, OBJECT_FORMAT, Object,
-    Record, Sensitive, SentShare, Token, validate_name,
+    Approval, DEFAULT_PROTECTED, Entity, KnownProject, Launcher, OBJECT_FORMAT, Object, Record,
+    Sensitive, SentShare, Token, validate_name,
 };
 
 pub const HEADER_FILE: &str = "vault.json";
@@ -69,10 +69,16 @@ pub struct Header {
     /// unlocking the global vault also unlocks this one.
     #[serde(default)]
     pub global: Option<GlobalWrap>,
-    /// When the password or the recovery code last changed. `cemi sync`
-    /// keeps the newer header when two computers changed it.
+    /// When the password last changed. `cemi sync` keeps the newer password
+    /// wrap, and the newer recovery wrap, each on its own.
     #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub changed: Option<Timestamp>,
+    pub password_changed: Option<Timestamp>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub recovery_changed: Option<Timestamp>,
+    /// Tag made with the vault key over everything above, so a header that
+    /// someone without the vault key wrote (or put back) is refused.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub mac: Option<String>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -172,7 +178,7 @@ impl Header {
             &self.aad("password"),
             master.secret_text().as_bytes(),
         ));
-        self.changed = Some(Timestamp::now());
+        self.password_changed = Some(Timestamp::now());
         Ok(())
     }
 
@@ -185,11 +191,30 @@ impl Header {
             &self.aad("recovery"),
             master.secret_text().as_bytes(),
         ));
-        self.changed = Some(Timestamp::now());
+        self.recovery_changed = Some(Timestamp::now());
         Ok(code)
     }
 
-    pub fn write(&self, dir: &Path) -> Result<()> {
+    fn signed_bytes(&self) -> Result<Vec<u8>> {
+        let mut unsigned = self.clone();
+        unsigned.mac = None;
+        Ok(serde_json::to_vec(&unsigned)?)
+    }
+
+    /// Whether the vault key made this header's tag.
+    pub fn signed_by(&self, mac: &crypto::MacKey) -> bool {
+        match (&self.mac, self.signed_bytes()) {
+            (Some(tag), Ok(bytes)) => mac.verify(&[b"header", &bytes], tag),
+            _ => false,
+        }
+    }
+
+    /// Signs the header with the vault key and writes it.
+    pub fn write(&mut self, dir: &Path, master: &AgeKey) -> Result<()> {
+        let mac = crypto::MacKey::for_vault(master);
+        self.mac = None;
+        let bytes = self.signed_bytes()?;
+        self.mac = Some(mac.tag(&[b"header", &bytes]));
         let text = serde_json::to_string_pretty(self)?;
         atomic_write(&dir.join(HEADER_FILE), text.as_bytes())
     }
@@ -226,6 +251,8 @@ pub struct Vault {
     pub dir: PathBuf,
     pub header: Header,
     master: AgeKey,
+    /// Signs and checks objects and the header (from the vault key).
+    mac: crypto::MacKey,
     pub entities: BTreeMap<String, Entity>,
     pub records: BTreeMap<String, Record>,
     pub tokens: BTreeMap<String, Token>,
@@ -288,7 +315,9 @@ impl Vault {
             password: None,
             recovery: None,
             global: None,
-            changed: None,
+            password_changed: None,
+            recovery_changed: None,
+            mac: None,
         };
         let mut recovery_code = None;
         if let Some(pw) = password {
@@ -323,6 +352,7 @@ impl Vault {
         let mut vault = Vault {
             dir: dir.to_path_buf(),
             header,
+            mac: crypto::MacKey::for_vault(&master),
             master,
             entities: BTreeMap::new(),
             records: BTreeMap::new(),
@@ -341,7 +371,8 @@ impl Vault {
         vault.dirty.insert(root.id.clone());
         vault.entities.insert(root.id.clone(), root);
         vault.save()?;
-        vault.header.write(dir)?;
+        let master = vault.master.clone();
+        vault.header.write(dir, &master)?;
         Ok(Created {
             vault,
             recovery_code,
@@ -356,6 +387,14 @@ impl Vault {
         let header = Header::read(dir)?;
         if master.recipient().to_string() != header.recipient {
             bail!("wrong key for the vault in {}", dir.display());
+        }
+        let mac = crypto::MacKey::for_vault(&master);
+        let signed = header.mac.is_some();
+        if signed && !header.signed_by(&mac) {
+            bail!(
+                "{} was not written with this vault's key (changed by hand, or by someone else in a synced repository). Restore it from a backup or from `git log` in that folder",
+                dir.join(HEADER_FILE).display()
+            );
         }
         let mut pending: Vec<(String, Vec<u8>)> = Vec::new();
         let objects_dir = dir.join(OBJECTS_DIR);
@@ -377,6 +416,7 @@ impl Vault {
         let mut vault = Vault {
             dir: dir.to_path_buf(),
             header,
+            mac: crypto::MacKey::for_vault(&master),
             master,
             entities: BTreeMap::new(),
             records: BTreeMap::new(),
@@ -403,22 +443,27 @@ impl Vault {
             for (id, ct) in pending {
                 match crypto::age_decrypt_any(&key_refs, &ct) {
                     Ok(Some(plain)) => {
-                        let env: Envelope = match serde_json::from_slice(&plain) {
-                            Ok(e) => e,
-                            Err(_) => {
+                        let object = match open_object(&vault.mac, &id, &plain) {
+                            Opened::Signed(o) => o,
+                            // Written before tags existed: trusted only while
+                            // the header is unsigned too (a vault never synced
+                            // or signed yet), and signed on the next save.
+                            Opened::Unsigned(o) if !signed => {
+                                if write {
+                                    vault.dirty.insert(id.clone());
+                                }
+                                o
+                            }
+                            Opened::Format(f) => {
+                                bail!("object {id} uses format {f}; update cemi")
+                            }
+                            // Forged, damaged, or renamed on disk: never trusted.
+                            Opened::Unsigned(_) | Opened::Bad => {
                                 vault.unreadable.push(id);
                                 continue;
                             }
                         };
-                        if env.format != OBJECT_FORMAT {
-                            bail!("object {id} uses format {}; update cemi", env.format);
-                        }
-                        if env.object.id() != id {
-                            // A file renamed or swapped on disk: refuse to trust it.
-                            vault.unreadable.push(id);
-                            continue;
-                        }
-                        match env.object {
+                        match object {
                             Object::Entity(e) => {
                                 new_keys.push(AgeKey::parse(e.identity.expose())?);
                                 vault.entities.insert(id, e);
@@ -488,14 +533,15 @@ impl Vault {
     pub fn save(&mut self) -> Result<()> {
         let objects = self.dir.join(OBJECTS_DIR);
         for id in std::mem::take(&mut self.dirty) {
-            let (object, recipient) = self.object_and_recipient(&id)?;
-            let envelope = Envelope {
-                format: OBJECT_FORMAT,
-                object,
-            };
-            let plain = Zeroizing::new(serde_json::to_vec(&envelope)?);
-            let ct = crypto::age_encrypt(&recipient, &plain)?;
+            let ct = self.seal_object(&id)?;
             atomic_write(&objects.join(format!("{id}.age")), &ct)?;
+        }
+        // Objects written before tags existed are signed on the first save;
+        // the header is signed after them, and from then on every object
+        // must carry a tag.
+        if self.write && self.header.mac.is_none() {
+            let master = self.master.clone();
+            self.header.write(&self.dir, &master)?;
         }
         for id in std::mem::take(&mut self.deleted) {
             let path = objects.join(format!("{id}.age"));
@@ -508,14 +554,27 @@ impl Vault {
             let waiting = self.approvals.values().filter(|a| a.expires > now).count();
             atomic_write(
                 &self.dir.join(REQUESTS_FILE),
-                format!(
-                    "{waiting}
-"
-                )
-                .as_bytes(),
+                format!("{waiting}\n").as_bytes(),
             )?;
         }
         Ok(())
+    }
+
+    /// The file of an object: age-encrypted to its key, with a tag made with
+    /// the vault key over its id and contents.
+    pub fn seal_object(&self, id: &str) -> Result<Vec<u8>> {
+        let (object, recipient) = self.object_and_recipient(id)?;
+        let json = Zeroizing::new(serde_json::to_string(&object)?);
+        let tag = self.mac.tag(&[b"object", id.as_bytes(), json.as_bytes()]);
+        let plain = Zeroizing::new(format!(
+            "{{\"format\":{OBJECT_FORMAT},\"object\":{},\"mac\":\"{tag}\"}}",
+            json.as_str()
+        ));
+        crypto::age_encrypt(&recipient, plain.as_bytes())
+    }
+
+    pub fn mac_key(&self) -> &crypto::MacKey {
+        &self.mac
     }
 
     fn object_and_recipient(&self, id: &str) -> Result<(Object, age::x25519::Recipient)> {
@@ -831,16 +890,9 @@ impl Vault {
         };
         let id = p.id.clone();
         self.projects.insert(id.clone(), p);
-        let written = self
-            .object_and_recipient(&id)
-            .and_then(|(object, recipient)| {
-                let plain = Zeroizing::new(serde_json::to_vec(&Envelope {
-                    format: OBJECT_FORMAT,
-                    object,
-                })?);
-                let ct = crypto::age_encrypt(&recipient, &plain)?;
-                atomic_write(&self.dir.join(OBJECTS_DIR).join(format!("{id}.age")), &ct)
-            });
+        let written = self.seal_object(&id).and_then(|ct| {
+            atomic_write(&self.dir.join(OBJECTS_DIR).join(format!("{id}.age")), &ct)
+        });
         if let Err(e) = written {
             self.projects.remove(&id);
             return Err(e);
@@ -889,6 +941,44 @@ impl Vault {
         self.dirty.insert(id);
     }
 
+    /// A copy of any object by id.
+    pub fn object(&self, id: &str) -> Option<Object> {
+        if let Some(e) = self.entities.get(id) {
+            return Some(Object::Entity(e.clone()));
+        }
+        if let Some(r) = self.records.get(id) {
+            return Some(Object::Record(r.clone()));
+        }
+        if let Some(t) = self.tokens.get(id) {
+            return Some(Object::Token(t.clone()));
+        }
+        if let Some(l) = self.launchers.get(id) {
+            return Some(Object::Launcher(l.clone()));
+        }
+        if let Some(a) = self.approvals.get(id) {
+            return Some(Object::Approval(a.clone()));
+        }
+        if let Some(p) = self.projects.get(id) {
+            return Some(Object::Project(p.clone()));
+        }
+        self.shares.get(id).map(|sh| Object::Share(sh.clone()))
+    }
+
+    /// Removes any object; its file is deleted on save.
+    pub fn remove_object(&mut self, id: &str) {
+        if self.approvals.remove(id).is_some() {
+            self.approvals_touched = true;
+        }
+        self.entities.remove(id);
+        self.records.remove(id);
+        self.tokens.remove(id);
+        self.launchers.remove(id);
+        self.projects.remove(id);
+        self.shares.remove(id);
+        self.dirty.remove(id);
+        self.deleted.insert(id.to_string());
+    }
+
     /// Takes in an object whose file is already on disk (it came from
     /// another computer through `cemi sync`).
     pub fn adopt(&mut self, object: Object) {
@@ -907,6 +997,7 @@ impl Vault {
                 self.launchers.insert(id.clone(), l);
             }
             Object::Approval(a) => {
+                self.approvals_touched = true;
                 self.approvals.insert(id.clone(), a);
             }
             Object::Project(p) => {
@@ -955,13 +1046,63 @@ pub fn display_path(path: &[String]) -> String {
 }
 
 #[cfg(unix)]
-fn restrict_permissions(dir: &Path) {
+pub(crate) fn restrict_permissions(dir: &Path) {
     use std::os::unix::fs::PermissionsExt;
     let _ = fs::set_permissions(dir, fs::Permissions::from_mode(0o700));
 }
 
+/// What an object file holds, once decrypted.
+pub enum Opened {
+    /// With a valid tag from the vault key.
+    Signed(Object),
+    /// Written before tags existed.
+    Unsigned(Object),
+    /// A format this version does not know.
+    Format(u32),
+    /// Not an object, a tag that does not match, or an id that is not its
+    /// file name.
+    Bad,
+}
+
+#[derive(Deserialize)]
+struct RawEnvelope<'a> {
+    format: u32,
+    #[serde(borrow)]
+    object: &'a serde_json::value::RawValue,
+    #[serde(default)]
+    mac: Option<String>,
+}
+
+/// Checks a decrypted object file (`id` is its file name).
+pub fn open_object(mac: &crypto::MacKey, id: &str, plain: &[u8]) -> Opened {
+    let Ok(env) = serde_json::from_slice::<RawEnvelope>(plain) else {
+        return Opened::Bad;
+    };
+    if env.format != OBJECT_FORMAT {
+        return Opened::Format(env.format);
+    }
+    let Ok(object) = serde_json::from_str::<Object>(env.object.get()) else {
+        return Opened::Bad;
+    };
+    if object.id() != id {
+        return Opened::Bad;
+    }
+    match env.mac {
+        Some(tag)
+            if mac.verify(
+                &[b"object", id.as_bytes(), env.object.get().as_bytes()],
+                &tag,
+            ) =>
+        {
+            Opened::Signed(object)
+        }
+        Some(_) => Opened::Bad,
+        None => Opened::Unsigned(object),
+    }
+}
+
 #[cfg(not(unix))]
-fn restrict_permissions(_dir: &Path) {
+pub(crate) fn restrict_permissions(_dir: &Path) {
     // On Windows, folders under the user profile are already private to the user.
 }
 

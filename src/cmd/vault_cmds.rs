@@ -219,7 +219,7 @@ pub fn recovery(ctx: &mut Ctx, cmd: RecoveryCmd) -> Result<i32> {
             let pw = ui::new_password(&format!("the {scope} vault"))?;
             header.set_password(vault.master(), &pw)?;
             let new_code = header.new_recovery(vault.master())?;
-            header.write(&dir)?;
+            header.write(&dir, vault.master())?;
             session::store(&header.id, vault.master())?;
             audit::append(&dir, &header, event("recovery.reset"))?;
             ui::ok("New password set. The old recovery code no longer works; here is the new one.");
@@ -233,7 +233,7 @@ pub fn recovery(ctx: &mut Ctx, cmd: RecoveryCmd) -> Result<i32> {
             }
             let mut header = vault.header.clone();
             let code = header.new_recovery(vault.master())?;
-            header.write(&dir)?;
+            header.write(&dir, vault.master())?;
             vault.header = header;
             ctx.audit(scope, "recovery.new", None, None);
             ui::ok("New recovery code created. The old one no longer works.");
@@ -256,7 +256,7 @@ pub fn passwd(ctx: &mut Ctx) -> Result<i32> {
     } else {
         None
     };
-    header.write(&dir)?;
+    header.write(&dir, vault.master())?;
     vault.header = header;
     ctx.audit(scope, "passwd", None, None);
     ui::ok(if had_password {

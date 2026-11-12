@@ -961,6 +961,9 @@ pub enum ShareCmd {
         /// Put it under another entity path (default: the sender's path)
         #[arg(long = "as", value_name = "ENTITY")]
         as_path: Option<String>,
+        /// Do not ask (it still shows who sent it and what it holds)
+        #[arg(long)]
+        yes: bool,
     },
     /// What this vault shared, with whom, and whether it changed since
     Ls,

@@ -235,6 +235,104 @@ pub fn age_decrypt_any(keys: &[&AgeKey], ciphertext: &[u8]) -> Result<Option<Zer
     }
 }
 
+/// A key that proves an object or a header was written by someone holding
+/// the vault key. age encrypts to the vault's public key, which anyone can
+/// read in `vault.json`; this tag is what tells a real object from a forged
+/// one (for example in a synced repository).
+pub struct MacKey(Zeroizing<[u8; 32]>);
+
+impl MacKey {
+    pub fn for_vault(master: &AgeKey) -> MacKey {
+        use hmac::{Hmac, Mac};
+        let secret = master.secret_text();
+        let mut m = <Hmac<Sha256> as Mac>::new_from_slice(secret.as_bytes())
+            .expect("HMAC takes keys of any size");
+        m.update(b"cemi-vault-mac-v1");
+        let out: [u8; 32] = m.finalize().into_bytes().into();
+        MacKey(Zeroizing::new(out))
+    }
+
+    /// The tag of `parts` (each one length-prefixed, so they cannot shift).
+    pub fn tag(&self, parts: &[&[u8]]) -> String {
+        use hmac::{Hmac, Mac};
+        let mut m = <Hmac<Sha256> as Mac>::new_from_slice(self.0.as_slice())
+            .expect("HMAC takes keys of any size");
+        for p in parts {
+            m.update(&(p.len() as u64).to_le_bytes());
+            m.update(p);
+        }
+        data_encoding::HEXLOWER.encode(&m.finalize().into_bytes())
+    }
+
+    pub fn verify(&self, parts: &[&[u8]], tag: &str) -> bool {
+        ct_eq(self.tag(parts).as_bytes(), tag.as_bytes())
+    }
+}
+
+/// The raw X25519 secret of an age identity.
+fn x25519_secret(key: &AgeKey) -> Result<Zeroizing<[u8; 32]>> {
+    let text = key.secret_text();
+    let (_, data) = bech32::decode(&text).map_err(|_| anyhow!("invalid age identity"))?;
+    let data = Zeroizing::new(data);
+    let bytes: [u8; 32] = data
+        .as_slice()
+        .try_into()
+        .map_err(|_| anyhow!("invalid age identity"))?;
+    Ok(Zeroizing::new(bytes))
+}
+
+/// The raw X25519 public key of an age recipient (`age1…`).
+fn x25519_public(recipient: &str) -> Result<[u8; 32]> {
+    parse_recipient(recipient)?;
+    let (_, data) =
+        bech32::decode(recipient.trim()).map_err(|_| anyhow!("invalid age recipient"))?;
+    data.as_slice()
+        .try_into()
+        .map_err(|_| anyhow!("invalid age recipient"))
+}
+
+/// Proves to `receiver` that `message` comes from the holder of `sender`:
+/// a NaCl box (X25519 + XSalsa20-Poly1305) of the message's SHA-256, which
+/// only these two keys can make or open.
+pub fn prove(sender: &AgeKey, receiver: &str, message: &[u8]) -> Result<String> {
+    use crypto_box::aead::{Aead, AeadCore, OsRng};
+    let sk = crypto_box::SecretKey::from(*x25519_secret(sender)?);
+    let pk = crypto_box::PublicKey::from(x25519_public(receiver)?);
+    let b = crypto_box::SalsaBox::new(&pk, &sk);
+    let nonce = crypto_box::SalsaBox::generate_nonce(&mut OsRng);
+    let digest = Sha256::digest(message);
+    let sealed = b
+        .encrypt(&nonce, digest.as_slice())
+        .map_err(|_| anyhow!("cannot sign the share"))?;
+    let mut out = nonce.to_vec();
+    out.extend_from_slice(&sealed);
+    Ok(BASE64.encode(&out))
+}
+
+/// Checks a proof made with [`prove`].
+pub fn check_proof(receiver: &AgeKey, sender: &str, message: &[u8], proof: &str) -> bool {
+    use crypto_box::aead::Aead;
+    let (Ok(raw), Ok(sk), Ok(pk)) = (
+        BASE64.decode(proof.as_bytes()),
+        x25519_secret(receiver),
+        x25519_public(sender),
+    ) else {
+        return false;
+    };
+    if raw.len() < 24 {
+        return false;
+    }
+    let b = crypto_box::SalsaBox::new(
+        &crypto_box::PublicKey::from(pk),
+        &crypto_box::SecretKey::from(*sk),
+    );
+    let nonce = crypto_box::Nonce::from_slice(&raw[..24]);
+    match b.decrypt(nonce, &raw[24..]) {
+        Ok(digest) => ct_eq(&digest, Sha256::digest(message).as_slice()),
+        Err(_) => false,
+    }
+}
+
 pub fn sha256_hex(data: &[u8]) -> String {
     data_encoding::HEXLOWER.encode(&Sha256::digest(data))
 }
@@ -250,6 +348,26 @@ pub fn ct_eq(a: &[u8], b: &[u8]) -> bool {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn proofs_name_the_sender() {
+        let alice = AgeKey::generate();
+        let bob = AgeKey::generate();
+        let eve = AgeKey::generate();
+        let bob_pub = bob.recipient().to_string();
+        let alice_pub = alice.recipient().to_string();
+        let p = prove(&alice, &bob_pub, b"bundle").unwrap();
+        assert!(check_proof(&bob, &alice_pub, b"bundle", &p));
+        assert!(!check_proof(&bob, &alice_pub, b"other", &p));
+        // Eve cannot make a proof that says it is Alice's.
+        let forged = prove(&eve, &bob_pub, b"bundle").unwrap();
+        assert!(!check_proof(&bob, &alice_pub, b"bundle", &forged));
+        let mac = MacKey::for_vault(&alice);
+        let tag = mac.tag(&[b"a", b"bc"]);
+        assert!(mac.verify(&[b"a", b"bc"], &tag));
+        assert!(!mac.verify(&[b"ab", b"c"], &tag));
+        assert!(!MacKey::for_vault(&bob).verify(&[b"a", b"bc"], &tag));
+    }
 
     #[test]
     fn seal_round_trip_and_tamper() {

@@ -9,6 +9,11 @@
 //! The sender's vault keeps a digest of every value sent, so `cemi status`
 //! says when a shared value changed and the bundle should be sent again.
 //! Nothing can be taken back: whoever received a value keeps it.
+//!
+//! age does not say who encrypted a file, so the bundle carries a proof made
+//! with the sender's vault key for the receiver's key: only that sender
+//! could have made it. Accepting only updates records that came from the
+//! same share; it never touches anything else in the receiver's vault.
 
 use std::collections::BTreeMap;
 use std::io::{Read, Write};
@@ -20,7 +25,9 @@ use zeroize::Zeroizing;
 
 use crate::cmd_shared::Attention;
 use crate::crypto::{self, AgeKey};
-use crate::model::{FieldKind, Received, Record, SHARED, SentShare, Value, Version, VersionState};
+use crate::model::{
+    FieldKind, Received, Record, SHARED, SentShare, Value, Version, VersionState, validate_name,
+};
 use crate::vault::Vault;
 
 pub const FORMAT: u32 = 1;
@@ -219,10 +226,27 @@ pub fn make(
     Ok((bundle, record, left))
 }
 
-/// The bundle as armored age text, readable only by `to`.
-pub fn seal(bundle: &Bundle, to: &str) -> Result<String> {
+/// Largest share file `accept` reads.
+pub const MAX_FILE: u64 = 32 * 1024 * 1024;
+
+/// What the age file holds: the bundle as text, and the sender's proof over
+/// exactly that text.
+#[derive(Serialize, Deserialize)]
+struct Signed {
+    bundle: String,
+    proof: String,
+}
+
+/// The bundle as armored age text, readable only by `to`, with a proof that
+/// `sender` (this vault's key) made it.
+pub fn seal(bundle: &Bundle, to: &str, sender: &AgeKey) -> Result<String> {
     let recipient = crypto::parse_recipient(to)?;
-    let plain = Zeroizing::new(serde_json::to_vec(bundle)?);
+    let json = Zeroizing::new(serde_json::to_string(bundle)?);
+    let proof = crypto::prove(sender, to, json.as_bytes())?;
+    let plain = Zeroizing::new(serde_json::to_vec(&Signed {
+        bundle: json.to_string(),
+        proof,
+    })?);
     let encryptor =
         age::Encryptor::with_recipients(std::iter::once(&recipient as &dyn age::Recipient))
             .map_err(|e| anyhow!("encryption failed: {e}"))?;
@@ -239,12 +263,12 @@ pub fn seal(bundle: &Bundle, to: &str) -> Result<String> {
     Ok(String::from_utf8(out).expect("armored text"))
 }
 
-/// Opens a bundle with one of `keys` (the vault keys of this computer).
-pub fn open(text: &[u8], keys: &[&AgeKey]) -> Result<Bundle> {
+/// Opens a bundle with this vault's key and checks who made it.
+pub fn open(text: &[u8], key: &AgeKey) -> Result<Bundle> {
     let reader = age::armor::ArmoredReader::new(text);
     let decryptor =
         age::Decryptor::new(reader).map_err(|_| anyhow!("this is not a Cemí share file"))?;
-    let identities = keys.iter().map(|k| k.identity() as &dyn age::Identity);
+    let identities = std::iter::once(key.identity() as &dyn age::Identity);
     let mut plain = Zeroizing::new(Vec::new());
     match decryptor.decrypt(identities) {
         Ok(mut r) => {
@@ -258,15 +282,139 @@ pub fn open(text: &[u8], keys: &[&AgeKey]) -> Result<Bundle> {
         }
         Err(e) => bail!("cannot open the share file: {e}"),
     }
-    let bundle: Bundle =
+    let signed: Signed =
         serde_json::from_slice(&plain).context("the share file is not a Cemí share")?;
+    let signed_text = Zeroizing::new(signed.bundle);
+    let bundle: Bundle =
+        serde_json::from_str(&signed_text).context("the share file is not a Cemí share")?;
     if bundle.cemi_share != FORMAT {
         bail!(
             "this share uses format {}; update cemi to accept it",
             bundle.cemi_share
         );
     }
+    if !crypto::check_proof(key, &bundle.from, signed_text.as_bytes(), &signed.proof) {
+        bail!(
+            "this file says it comes from {}, but that vault did not make it. Do not accept it; ask the sender for a new one",
+            short_key(&bundle.from)
+        );
+    }
     Ok(bundle)
+}
+
+/// Environments whose values a share of `envs` would hand over: the chosen
+/// ones, plus protected environments that use a value shared by all
+/// environments when that value is sent.
+pub fn reaches(v: &Vault, entity_id: &str, envs: &[String]) -> Vec<String> {
+    let subtree = v.subtree(entity_id);
+    let all_envs = v.effective_envs(entity_id);
+    let mut out: Vec<String> = envs.to_vec();
+    for r in v
+        .records
+        .values()
+        .filter(|r| !r.archived && subtree.contains(&r.entity))
+    {
+        for f in &r.fields {
+            let uses_shared =
+                envs.iter().any(|e| !f.values.contains_key(e)) && f.values.contains_key(SHARED);
+            if !uses_shared {
+                continue;
+            }
+            for e in &all_envs {
+                if !f.values.contains_key(e) && !out.contains(e) {
+                    out.push(e.clone());
+                }
+            }
+        }
+    }
+    out
+}
+
+/// Records in this vault that a bundle would overwrite but that did not
+/// come from that share, and anything in the bundle that is not allowed.
+/// `accept` refuses to run while this finds something.
+pub fn check(v: &Vault, bundle: &Bundle, target: &[String]) -> Result<()> {
+    let now = Timestamp::now();
+    for env in &bundle.envs {
+        validate_name(env, "environment")?;
+        if env == SHARED {
+            bail!("the share lists an environment named {SHARED:?}; it cannot be accepted");
+        }
+    }
+    let names: std::collections::BTreeSet<(Vec<String>, String)> = bundle
+        .records
+        .iter()
+        .map(|r| (r.entity.clone(), r.name.clone()))
+        .collect();
+    for e in &bundle.entities {
+        for part in &e.path {
+            validate_name(part, "entity")?;
+        }
+    }
+    let mut taken = Vec::new();
+    for r in &bundle.records {
+        for part in &r.entity {
+            validate_name(part, "entity")?;
+        }
+        validate_name(&r.name, "record")?;
+        for f in &r.fields {
+            validate_name(&f.name, "field")?;
+            for (env, sv) in &f.values {
+                if !bundle.envs.contains(env) {
+                    bail!(
+                        "{}#{} has a value for {env:?}, which the share does not list; it cannot be accepted",
+                        r.name,
+                        f.name
+                    );
+                }
+                if f.kind == FieldKind::Template {
+                    let text = match &sv.value {
+                        Value::Text { text } => text.expose().to_string(),
+                        Value::File { .. } => String::new(),
+                    };
+                    for part in crate::resolve::template_refs(&text) {
+                        let inside = !part.starts_with('/')
+                            && crate::refs::Ref::parse(&part).is_ok_and(|x| {
+                                x.vault == crate::refs::VaultSel::Default
+                                    && names.contains(&(
+                                        [r.entity.clone(), x.entities.clone()].concat(),
+                                        x.record.clone(),
+                                    ))
+                            });
+                        if !inside {
+                            bail!(
+                                "{}#{} is built from {{{{{part}}}}}, which is not part of the share: it could read another value of this vault. It cannot be accepted",
+                                r.name,
+                                f.name
+                            );
+                        }
+                    }
+                }
+            }
+        }
+        let path = [target, &r.entity].concat();
+        if let Some(eid) = v.find_entity(&path).map(|e| e.id.clone())
+            && let Some(existing) = v.find_record_in(&eid, &r.name)
+        {
+            let ours = existing
+                .received
+                .as_ref()
+                .is_some_and(|rec| rec.share == bundle.id && rec.from == bundle.from);
+            if !ours {
+                taken.push(format!("{}/{}", path.join("/"), r.name));
+            }
+        }
+    }
+    if !taken.is_empty() {
+        bail!(
+            "this vault already has {}, not from this share. Nothing was changed; accept it somewhere else with --as <entity>",
+            taken.join(", ")
+        );
+    }
+    if bundle.created > now + jiff::SignedDuration::from_mins(10) {
+        bail!("the share is dated in the future; check the sender's clock");
+    }
+    Ok(())
 }
 
 /// What `accept` did.
@@ -278,9 +426,13 @@ pub struct Accepted {
     pub kept_newer: usize,
 }
 
-/// Imports a bundle under `target` (an entity path in this vault).
+/// Imports a bundle under `target` (an entity path in this vault), after
+/// [`check`].
 pub fn accept(v: &mut Vault, bundle: &Bundle, target: &[String]) -> Result<Accepted> {
+    check(v, bundle, target)?;
     let mut done = Accepted::default();
+    // No value is dated later than the bundle itself, or than now.
+    let latest = bundle.created.min(Timestamp::now());
     let from_label = format!("share:{}", short_key(&bundle.from));
     for e in &bundle.entities {
         let path = [target, &e.path].concat();
@@ -300,8 +452,8 @@ pub fn accept(v: &mut Vault, bundle: &Bundle, target: &[String]) -> Result<Accep
         let entity_id = v.ensure_entity(&path)?;
         let rid = match v.find_record_in(&entity_id, &r.name) {
             Some(existing) => {
+                // `check` made sure it came from this share.
                 if let Some(rec) = &existing.received
-                    && rec.share == bundle.id
                     && rec.at > bundle.created
                 {
                     // A newer bundle of this share was already accepted.
@@ -333,12 +485,13 @@ pub fn accept(v: &mut Vault, bundle: &Bundle, target: &[String]) -> Result<Accep
             };
             field.secret = field.secret || sf.secret;
             for (env, sv) in &sf.values {
+                let at = sv.at.min(latest);
                 let slot = field.values.entry(env.clone()).or_default();
                 if let Some(cur) = slot.current_version() {
                     if crypto::ct_eq(&cur.value.bytes(), &sv.value.bytes()) {
                         continue;
                     }
-                    if cur.at >= sv.at {
+                    if cur.at >= at {
                         done.kept_newer += 1;
                         continue;
                     }
@@ -352,7 +505,7 @@ pub fn accept(v: &mut Vault, bundle: &Bundle, target: &[String]) -> Result<Accep
                 slot.versions.push(Version {
                     value: sv.value.clone(),
                     state: VersionState::Active,
-                    at: sv.at,
+                    at,
                     actor: from_label.clone(),
                     note: Some(format!(
                         "received {}",

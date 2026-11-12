@@ -16,7 +16,7 @@ use crate::model::{Entity, Field, Object, Record, Slot, Version, VersionState};
 
 /// True when both serialize to the same bytes (compared in constant time,
 /// since they may hold secrets).
-fn same<T: Serialize>(a: &T, b: &T) -> bool {
+pub fn same<T: Serialize>(a: &T, b: &T) -> bool {
     let x = Zeroizing::new(serde_json::to_vec(a).unwrap_or_default());
     let y = Zeroizing::new(serde_json::to_vec(b).unwrap_or_default());
     crypto::ct_eq(&x, &y)
@@ -113,8 +113,21 @@ fn by_id<V: Clone>(items: &[V], id: impl Fn(&V) -> &str) -> BTreeMap<String, V> 
         .collect()
 }
 
+/// A yes/no setting both sides may have changed: a side that changed it
+/// from the base wins; if both did, `prefer_theirs` decides.
+fn merge_flag(base: Option<bool>, o: bool, t: bool, prefer_theirs: bool) -> bool {
+    match base {
+        Some(b) if o == b => t,
+        Some(b) if t == b => o,
+        Some(_) => pick(prefer_theirs, &o, &t),
+        // No common copy: the safer choice.
+        None => o || t,
+    }
+}
+
 fn merge_field(base: Option<&Field>, o: &Field, t: &Field, prefer_theirs: bool) -> Field {
     let mut f = pick(prefer_theirs, o, t);
+    f.secret = merge_flag(base.map(|b| b.secret), o.secret, t.secret, prefer_theirs);
     f.values = merge_keyed(base.map(|b| &b.values), &o.values, &t.values, |_, a, b| {
         merge_slot(a, b)
     });
@@ -202,6 +215,7 @@ fn merge_entity(base: Option<&Entity>, o: &Entity, t: &Entity) -> Entity {
     let mut e = pick(prefer_theirs, o, t);
     // The key never changes; if it did, the copy that opens existing records wins.
     e.identity = o.identity.clone();
+    e.parent = o.parent.clone();
     e.updated = o.updated.max(t.updated);
     for env in o.envs.iter().chain(t.envs.iter()) {
         if !e.envs.contains(env) {
@@ -211,6 +225,72 @@ fn merge_entity(base: Option<&Entity>, o: &Entity, t: &Entity) -> Entity {
     e.memory = merge_keyed(base.map(|b| &b.memory), &o.memory, &t.memory, |_, a, b| {
         pick(prefer_theirs, a, b)
     });
+    e.protected = merge_protected(base, o, t);
+    e.approve_with = match base.map(|b| b.approve_with) {
+        Some(b) if o.approve_with == b => t.approve_with,
+        Some(b) if t.approve_with == b => o.approve_with,
+        _ => pick(prefer_theirs, &o.approve_with, &t.approve_with),
+    };
+    e
+}
+
+/// Protected environments: one protected on either side stays protected;
+/// one stops being protected only if a side removed it from the base list
+/// (with the password, on that computer) and the other did not add it back.
+fn merge_protected(base: Option<&Entity>, o: &Entity, t: &Entity) -> Option<Vec<String>> {
+    if o.protected.is_none() && t.protected.is_none() {
+        return None;
+    }
+    let list = |e: &Entity| -> Vec<String> {
+        match &e.protected {
+            Some(l) => l.clone(),
+            None => crate::model::DEFAULT_PROTECTED
+                .iter()
+                .map(|s| s.to_string())
+                .collect(),
+        }
+    };
+    let (lo, lt) = (list(o), list(t));
+    let lb = base.map(list);
+    let mut out: Vec<String> = Vec::new();
+    for env in lo.iter().chain(lt.iter()) {
+        if out.contains(env) {
+            continue;
+        }
+        let removed_by = |side: &Vec<String>| {
+            lb.as_ref().is_some_and(|b| b.contains(env)) && !side.contains(env)
+        };
+        if removed_by(&lo) || removed_by(&lt) {
+            continue;
+        }
+        out.push(env.clone());
+    }
+    Some(out)
+}
+
+/// Two entities that are the same one created on two computers (same parent
+/// and name, different ids): `keep`'s id and key stay; envs, notes and
+/// protection are joined.
+pub fn merge_entity_copies(keep: &Entity, other: &Entity) -> Entity {
+    let mut e = keep.clone();
+    for env in &other.envs {
+        if !e.envs.contains(env) {
+            e.envs.push(env.clone());
+        }
+    }
+    for (k, v) in &other.memory {
+        e.memory.entry(k.clone()).or_insert_with(|| v.clone());
+    }
+    if let Some(p) = &other.protected {
+        let mut list = e.protected.clone().unwrap_or_default();
+        for env in p {
+            if !list.contains(env) {
+                list.push(env.clone());
+            }
+        }
+        e.protected = Some(list);
+    }
+    e.updated = keep.updated.max(other.updated);
     e
 }
 
@@ -243,7 +323,11 @@ pub fn merge_object(base: Option<&Object>, ours: &Object, theirs: &Object) -> Ob
         (Object::Share(o), Object::Share(t)) => {
             Object::Share(if t.at > o.at { t.clone() } else { o.clone() })
         }
-        _ => ours.clone(),
+        // Launchers and requests: whichever side changed it from the base.
+        _ => match base {
+            Some(b) if same(b, ours) => theirs.clone(),
+            _ => ours.clone(),
+        },
     }
 }
 

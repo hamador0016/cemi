@@ -341,6 +341,11 @@ versiones de cada valor y la más nueva queda como actual, y se conservan los ca
 destinos y APIs que se agregaron de cada lado. Una contraseña cambiada en una computadora llega a
 las otras en su siguiente sincronización.
 
+Cada archivo lleva una marca hecha con la llave de la bóveda, que el repositorio nunca ve. Un
+archivo sin ella detiene la sincronización, y uno devuelto a una copia vieja se ignora: quien
+pueda subir al repositorio no puede meter un token ni traer de vuelta una contraseña o una llave
+viejas.
+
 ## Nunca subir un secreto
 
 ```bash

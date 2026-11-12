@@ -14,7 +14,9 @@ pub fn share(ctx: &mut Ctx, args: ShareArgs) -> Result<i32> {
     match args.cmd {
         Some(ShareCmd::Key) => key(ctx),
         Some(ShareCmd::Ls) => ls(ctx),
-        Some(ShareCmd::Accept { file, as_path }) => accept(ctx, &file, as_path.as_deref()),
+        Some(ShareCmd::Accept { file, as_path, yes }) => {
+            accept(ctx, &file, as_path.as_deref(), yes)
+        }
         None => {
             let Some(entity) = args.entity else {
                 bail!(
@@ -68,7 +70,12 @@ fn send(
             )));
         }
     }
-    let protected: Vec<String> = envs.iter().filter(|e| v.is_protected(e)).cloned().collect();
+    // A value shared by all environments is also the value of every
+    // environment without its own, protected ones included.
+    let protected: Vec<String> = share::reaches(v, &entity_id, envs)
+        .into_iter()
+        .filter(|e| v.is_protected(e))
+        .collect();
     if !protected.is_empty() {
         super::reauthenticate(
             ctx,
@@ -78,7 +85,7 @@ fn send(
     }
     let v = ctx.ws.open(scope)?;
     let (bundle, record, left) = share::make(v, &entity_id, to.trim(), name, envs)?;
-    let text = share::seal(&bundle, to.trim())?;
+    let text = share::seal(&bundle, to.trim(), v.master())?;
     let file = match output {
         Some(p) => ctx.ws.cwd.join(p),
         None => ctx.ws.cwd.join(format!("{}.share.age", path.join("-"))),
@@ -121,12 +128,18 @@ fn send(
     Ok(0)
 }
 
-fn accept(ctx: &mut Ctx, file: &std::path::Path, as_path: Option<&str>) -> Result<i32> {
-    let text = std::fs::read(ctx.ws.cwd.join(file))
-        .with_context(|| format!("cannot read {}", file.display()))?;
+fn accept(ctx: &mut Ctx, file: &std::path::Path, as_path: Option<&str>, yes: bool) -> Result<i32> {
+    let path = ctx.ws.cwd.join(file);
+    let size = std::fs::metadata(&path)
+        .with_context(|| format!("cannot read {}", file.display()))?
+        .len();
+    if size > share::MAX_FILE {
+        bail!("{} is larger than a share file can be", file.display());
+    }
+    let text = std::fs::read(&path).with_context(|| format!("cannot read {}", file.display()))?;
     let scope = ctx.scope()?;
     let v = ctx.ws.open(scope)?;
-    let bundle = share::open(&text, &[v.master()])?;
+    let bundle = share::open(&text, v.master())?;
     let target = match as_path {
         Some(p) => crate::refs::entity_path(p)?,
         None => bundle.entity.clone(),
@@ -134,6 +147,33 @@ fn accept(ctx: &mut Ctx, file: &std::path::Path, as_path: Option<&str>) -> Resul
     if target.is_empty() {
         bail!("--as needs an entity path, like acme/shop");
     }
+    share::check(v, &bundle, &target)?;
+    // A person sees who sent it and what it holds before anything changes.
+    let values: usize = bundle
+        .records
+        .iter()
+        .flat_map(|r| r.fields.iter())
+        .map(|f| f.values.len())
+        .sum();
+    eprintln!(
+        "From {} (checked: made by that vault), {}:\n  {} records and {values} values ({}) into {}",
+        bundle.from,
+        ui::when(bundle.created, "%Y-%m-%d %H:%M"),
+        bundle.records.len(),
+        bundle.envs.join(", "),
+        target.join("/")
+    );
+    if !yes {
+        if !std::io::IsTerminal::is_terminal(&std::io::stdin()) {
+            return Err(crate::errors::needs_person(
+                "accepting a share needs a yes: run it in a terminal, or pass --yes",
+            ));
+        }
+        if !ui::confirm("Accept it?") {
+            bail!("cancelled");
+        }
+    }
+    let v = ctx.ws.open(scope)?;
     let done = share::accept(v, &bundle, &target)?;
     v.save()?;
     let from = share::short_key(&bundle.from);
@@ -216,7 +256,7 @@ pub fn sync(ctx: &mut Ctx, args: SyncArgs) -> Result<i32> {
                 super::vault_cmds::add_to_gitignore(&ctx.ws.cwd)?;
             }
             ui::ok(format!(
-                "Copied the vault to {} ({label}). It opens with the same password; `cemi sync{}` keeps it up to date",
+                "Copied the vault to {} ({label}). It opens the same way as on the other computer; `cemi sync{}` keeps it up to date",
                 dir.display(),
                 if ctx.global { " -g" } else { "" }
             ));
@@ -274,6 +314,18 @@ pub fn sync(ctx: &mut Ctx, args: SyncArgs) -> Result<i32> {
                 ui::ok("Already up to date");
             } else {
                 ui::ok(format!("Synced: {}", parts.join("; ")));
+            }
+            if report.folded > 0 {
+                ui::warn(format!(
+                    "{} entities or records had been created with the same name on two computers; each is one now",
+                    report.folded
+                ));
+            }
+            if !report.old_copies.is_empty() {
+                ui::warn(format!(
+                    "the remote put back older copies of {} file(s); they were ignored. Someone with access to the repository may have done it: check its history",
+                    report.old_copies.len()
+                ));
             }
             if report.header_changed {
                 ui::warn(

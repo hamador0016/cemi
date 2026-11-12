@@ -338,6 +338,10 @@ merges them: every version of every value is kept and the newest one is current,
 notes, destinations and APIs added on either side are kept. A password changed on one computer
 reaches the others on their next sync.
 
+Every file carries a tag made with the vault key, which the repository never sees. A file
+without one stops the sync, and a file put back to an older copy is ignored, so whoever can push
+to the repository cannot plant a token or bring back an old password or key.
+
 ## Never commit a secret
 
 ```bash
