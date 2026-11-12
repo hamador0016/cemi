@@ -15,6 +15,16 @@ change commands. Vaults made by any earlier version keep opening (`tests/compat.
   (`--vault`), through the `doppler` and `op` programs: a preview with names only, then a
   question (`--yes` skips it). 1Password items become records and their fields become fields;
   attachments are skipped and counted.
+- Connectors in beta (built from the providers' documentation and tested against mock servers,
+  not yet against real accounts): `aws-access-key` (origin: AWS IAM access keys),
+  `aws-secret` (AWS Secrets Manager), `aws-parameter` (AWS Systems Manager Parameter Store),
+  `gitlab` (GitLab CI/CD variables, also self-managed), `fly` (Fly.io app secrets) and
+  `openai-key` (origin: OpenAI API keys of a project service account).
+- AWS requests are signed with Signature Version 4 implemented in Cemí, checked against AWS's
+  test suite; no AWS SDK.
+- `--id-field` for `aws-access-key`: a rotation also writes the new access key id to another
+  field of the record and sends it to that field's destinations, in the same step and with the
+  same rollback.
 
 ## 0.5.0
 
