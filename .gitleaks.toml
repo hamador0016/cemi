@@ -4,4 +4,4 @@ useDefault = true
 
 [allowlist]
 description = "Cargo.lock only lists crate names, versions and checksums; crate names like crypto_secretbox match the generic API key rule"
-paths = ['''^Cargo\.lock$''']
+paths = ['''(^|/)Cargo\.lock$''']

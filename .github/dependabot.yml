@@ -1,14 +1,23 @@
-# Weekly updates for Rust crates and the GitHub Actions above (pinned by hash).
+# Weekly updates, one pull request per ecosystem. Major versions of crates
+# change APIs (and here, often cryptography): they are upgraded by hand.
 version: 2
 updates:
   - package-ecosystem: cargo
     directory: /
     schedule:
       interval: weekly
-    open-pull-requests-limit: 5
+    groups:
+      crates:
+        update-types: [minor, patch]
+    ignore:
+      - dependency-name: "*"
+        update-types: ["version-update:semver-major"]
   - package-ecosystem: github-actions
     directories:
       - /
       - /.github/workflows
     schedule:
       interval: weekly
+    groups:
+      actions:
+        patterns: ["*"]
