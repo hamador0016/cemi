@@ -37,7 +37,32 @@ fn git_command(dir: &Path) -> Command {
     c.current_dir(dir)
         .args(["-c", "core.autocrlf=false", "-c", "core.symlinks=false"])
         .stdin(Stdio::null());
+    // Commits and merges need a name; without the person's own git
+    // identity, a neutral one.
+    if !has_identity(dir) {
+        c.env("GIT_AUTHOR_NAME", "cemi")
+            .env("GIT_AUTHOR_EMAIL", "cemi@localhost")
+            .env("GIT_COMMITTER_NAME", "cemi")
+            .env("GIT_COMMITTER_EMAIL", "cemi@localhost");
+    }
     c
+}
+
+/// Whether git has a user name and email to sign commits with.
+fn has_identity(dir: &Path) -> bool {
+    static KNOWN: std::sync::OnceLock<bool> = std::sync::OnceLock::new();
+    *KNOWN.get_or_init(|| {
+        let set = |key: &str| {
+            Command::new(crate::runner::resolve_program("git"))
+                .current_dir(dir)
+                .args(["config", key])
+                .stdin(Stdio::null())
+                .output()
+                .map(|o| o.status.success() && !o.stdout.trim_ascii().is_empty())
+                .unwrap_or(false)
+        };
+        set("user.email") && set("user.name")
+    })
 }
 
 fn run(dir: &Path, args: &[&str]) -> Result<Output> {
@@ -69,9 +94,6 @@ fn blob(dir: &Path, rev: &str, path: &str) -> Result<Option<Vec<u8>>> {
 
 /// Commits with the person's git identity, or a neutral one if git has none.
 fn commit(dir: &Path, message: &str) -> Result<()> {
-    let has_identity = run(dir, &["config", "user.email"])
-        .map(|o| o.status.success() && !o.stdout.trim_ascii().is_empty())
-        .unwrap_or(false);
     let mut c = git_command(dir);
     c.args([
         "commit",
@@ -81,12 +103,6 @@ fn commit(dir: &Path, message: &str) -> Result<()> {
         "-m",
         message,
     ]);
-    if !has_identity {
-        c.env("GIT_AUTHOR_NAME", "cemi")
-            .env("GIT_AUTHOR_EMAIL", "cemi@localhost")
-            .env("GIT_COMMITTER_NAME", "cemi")
-            .env("GIT_COMMITTER_EMAIL", "cemi@localhost");
-    }
     let out = c
         .output()
         .map_err(|_| anyhow!("cannot run git: install git and try again"))?;
