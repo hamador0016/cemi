@@ -1,0 +1,48 @@
+# Dependency policy for Cemí Desktop (cargo-deny), checked in CI.
+# The same rules as the command-line tool (../../deny.toml), with one exception:
+# MPL-2.0 is allowed here, because Tauri depends on it (cssparser, selectors,
+# dtoa-short, option-ext). MPL-2.0 is file-level copyleft: it covers changes to
+# those libraries' own files, not this app's code. The command-line tool stays
+# permissive only.
+
+[graph]
+all-features = true
+
+[licenses]
+confidence-threshold = 0.93
+unused-allowed-license = "allow"
+allow = [
+  "MIT",
+  "MIT-0",
+  "Apache-2.0",
+  "Apache-2.0 WITH LLVM-exception",
+  "BSD-2-Clause",
+  "BSD-3-Clause",
+  "ISC",
+  "Zlib",
+  "0BSD",
+  "BSL-1.0",
+  "CC0-1.0",
+  "Unicode-3.0",
+  "Unlicense",
+  "CDLA-Permissive-2.0",
+  "MPL-2.0",
+]
+
+[bans]
+multiple-versions = "allow"
+wildcards = "deny"
+# The app depends on the command-line crate by path (it is not published).
+allow-wildcard-paths = true
+
+[advisories]
+# Fail on known vulnerabilities (RustSec). Every exception below says why it does
+# not affect Cemí and when to remove it. Review them on every age update.
+ignore = [
+  { id = "RUSTSEC-2026-0387", reason = "crypto-bigint 0.5 timing issues, pulled in by age 0.12 through p256/hpke for its P-256 'tag' recipients. Cemí only creates and uses X25519 identities, and age's X25519 identity never runs P-256 code, so the affected operations never touch Cemí's secrets. Remove once age depends on elliptic-curve 0.14 / crypto-bigint >= 0.7.6." },
+  { id = "RUSTSEC-2026-0374", reason = "basic-toml is unmaintained (no vulnerability). age uses it via i18n-embed to read its own embedded localization config. Remove when age drops it." },
+]
+
+[sources]
+unknown-registry = "deny"
+unknown-git = "deny"

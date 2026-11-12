@@ -103,3 +103,12 @@ desktop/
   ui/                 the interface: index.html, app.css, app.js, mock.js
     fonts/            Inter (SIL Open Font License, see OFL.txt)
 ```
+
+## Licenses
+
+The app is Apache-2.0, like the rest of Cemí. Its dependencies are permissively licensed
+except for a few that Tauri itself depends on (cssparser, selectors, dtoa-short,
+option-ext), which are MPL-2.0: a file-level copyleft that covers changes to those
+libraries' own files, not this app's code. `deny.toml` in this folder allows MPL-2.0 for
+the app only, and CI checks it on every push; the command-line tool stays permissive
+only.
