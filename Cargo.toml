@@ -19,6 +19,7 @@ include = [
     "/README.md",
     "/README.es.md",
     "/SECURITY.md",
+    "/CHANGELOG.md",
 ]
 keywords = ["secrets", "vault", "mcp", "age", "env"]
 categories = ["command-line-utilities", "cryptography"]

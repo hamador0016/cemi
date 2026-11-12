@@ -1,0 +1,14 @@
+# Weekly updates for Rust crates and the GitHub Actions above (pinned by hash).
+version: 2
+updates:
+  - package-ecosystem: cargo
+    directory: /
+    schedule:
+      interval: weekly
+    open-pull-requests-limit: 5
+  - package-ecosystem: github-actions
+    directories:
+      - /
+      - /.github/workflows
+    schedule:
+      interval: weekly
