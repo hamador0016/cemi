@@ -39,6 +39,10 @@ pub struct ProjectFile {
     pub env: BTreeMap<String, RefSpec>,
     #[serde(default)]
     pub files: BTreeMap<String, RefSpec>,
+    /// Variables that get the address of Cemí's proxy for an API, in
+    /// `cemi run --proxy` (and AI runs in protected environments).
+    #[serde(default, skip_serializing_if = "BTreeMap::is_empty")]
+    pub proxy: BTreeMap<String, RefSpec>,
     #[serde(default)]
     pub ai: Ai,
     /// Secrets for CI (`cemi ci`).

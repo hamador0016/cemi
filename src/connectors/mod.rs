@@ -26,6 +26,10 @@ use crate::resolve;
 use crate::workspace::Workspace;
 
 pub use command::connector_program;
+/// Plain http only for this computer; used for API addresses too.
+pub use http::check_url;
+/// Percent-encodes text for a URL path segment or a query value.
+pub use http::segment as query_escape;
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
 #[serde(tag = "connector", rename_all = "kebab-case")]

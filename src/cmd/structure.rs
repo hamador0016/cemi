@@ -405,6 +405,15 @@ pub fn show(ctx: &mut Ctx, reference: &str) -> Result<i32> {
         for (e, cmd) in &f.verify {
             crate::outln!("      checked by ({}): {}", env_name(e), cmd.join(" "));
         }
+        for a in &f.apis {
+            crate::outln!(
+                "      API ({}): {}, allowed: {}  [{}]",
+                env_name(&a.env),
+                a.base,
+                a.allow.join(", "),
+                a.id
+            );
+        }
     }
     if !envs.is_empty() {
         crate::outln!();
@@ -466,6 +475,9 @@ fn record_json(v: &Vault, rec: &Record, scope: crate::vault::Scope, envs: &[Stri
                 })).collect::<Vec<_>>(),
                 "verify": f.verify.iter().map(|(e, c)| json!({
                     "env": env_json(e), "command": c,
+                })).collect::<Vec<_>>(),
+                "apis": f.apis.iter().map(|a| json!({
+                    "id": a.id, "env": env_json(&a.env), "base": a.base, "allow": a.allow,
                 })).collect::<Vec<_>>(),
             })
         })

@@ -163,10 +163,41 @@ cemi mcp add supabase --env SUPABASE_ACCESS_TOKEN=global:accounts/supabase#token
 
 **What redaction does not cover.** A command that receives a secret in its environment can
 still send it elsewhere or print it in an encoding Cemí does not recognize. Cemí narrows this
-down: AI clients can only run the commands you list, in the environments you list. The
-credential proxy planned for v0.4 closes it for HTTP APIs, because the command never receives
-the key. Until then, do not let an AI run commands with production secrets. Details in
+down: AI clients can only run the commands you list, in the environments you list. In protected
+environments (`prod` by default) an AI may only run a command when every secret goes through the
+credential proxy, so the command never receives a key. Details in
 [docs/threat-model.md](docs/threat-model.md).
+
+## Production APIs without the key
+
+Give a key the API it signs in to and the calls an AI may make with it:
+
+```bash
+cemi api add acme/shop/stripe#secret -e prod --base https://api.stripe.com \
+  --auth basic --allow "GET /v1/**" --allow "POST /v1/refunds"
+cemi token create claude --allow read --allow api --env prod --expires 1d
+```
+
+The AI calls the MCP tool `call_api` (`GET /v1/balance` on `acme/shop/stripe#secret`, `prod`).
+Cemí adds the key, sends the request only to `https://api.stripe.com`, refuses any method or path
+outside the rules, does not follow redirects, and hides the key if the answer contains it. You
+can try the same call yourself with `cemi api call stripe#secret -e prod GET /v1/balance`.
+
+Programs work the same way. List in `cemi.toml` the variable that holds the API's address:
+
+```toml
+[env]
+STRIPE_SECRET_KEY = "stripe#secret"
+
+[proxy]
+STRIPE_API_BASE = "stripe#secret"
+```
+
+`cemi run --proxy -e prod -- npm test` starts a proxy on `127.0.0.1` for that run.
+`STRIPE_SECRET_KEY` gets a placeholder and `STRIPE_API_BASE` the proxy's address. The proxy
+swaps the placeholder for the key. An AI's `run` in a protected environment always works this
+way, and fails if some secret of the command has no API. The program has to read the API's
+address from a variable; most SDKs accept a base URL.
 
 ## Rotate a key everywhere
 
@@ -266,7 +297,7 @@ Unlike pattern scanners, `cemi scan` looks for *your* values, whatever their for
 | Environments | `env ls/add/rm/diff/protect/unprotect` |
 | Rotation | `origin set/rm`, `dest add/ls/rm`, `verify`, `push`, `check`, `rotate`, `revoke`, `incident`, `approve` |
 | Project | `preset ls/add`, `link`, `var add/rm/ls`, `project ls/add/rm`, `run`, `types`, `ci setup/export/load`, `export`, `import` (`--discover` for every project) |
-| AI | `token create/ls/revoke`, `mcp serve/setup/add/launch/ls/rm` |
+| AI | `token create/ls/revoke`, `mcp serve/setup/add/launch/ls/rm`, `api add/ls/rm/call`, `run --proxy` |
 | Git | `scan`, `hook install` |
 
 `cemi help <command>` explains each one. References look like `[global:|local:]entity/record#field`.

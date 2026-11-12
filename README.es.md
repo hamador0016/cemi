@@ -159,12 +159,44 @@ cemi mcp add supabase --env SUPABASE_ACCESS_TOKEN=global:cuentas/supabase#token 
 # En el cliente de IA, el comando pasa a ser: cemi mcp launch supabase
 ```
 
-**Lo que ocultar la salida no cubre.** Un comando que recibe un secreto en su entorno todavía
-puede enviarlo a otro lado o imprimirlo en una codificación que Cemí no reconoce. Cemí lo
-reduce: la IA solo corre los comandos que tú listas, en los ambientes que tú listas. El proxy
-de credenciales previsto para la v0.4 lo cierra para las API HTTP, porque el comando nunca
-recibe la llave. Mientras tanto, no dejes que una IA corra comandos con secretos de
-producción. Detalles en [docs/threat-model.md](docs/threat-model.md).
+**Lo que el ocultamiento no cubre.** Un comando que recibe un secreto en sus variables
+igual puede mandarlo a otro lado o imprimirlo con una codificación que Cemí no reconoce. Cemí lo
+acota: los clientes de IA solo corren los comandos que listas y en los ambientes que listas. En
+los ambientes protegidos (`prod` por defecto) una IA solo puede correr un comando si todos sus
+secretos pasan por el proxy de credenciales, así el comando nunca recibe una llave. Detalles en
+[docs/threat-model.md](docs/threat-model.md).
+
+## APIs de producción sin la llave
+
+Dile a Cemí a qué API entra una llave y qué llamadas puede hacer una IA con ella:
+
+```bash
+cemi api add acme/shop/stripe#secret -e prod --base https://api.stripe.com \
+  --auth basic --allow "GET /v1/**" --allow "POST /v1/refunds"
+cemi token create claude --allow read --allow api --env prod --expires 1d
+```
+
+La IA usa la herramienta MCP `call_api` (`GET /v1/balance` con `acme/shop/stripe#secret`,
+`prod`). Cemí agrega la llave, manda la solicitud solo a `https://api.stripe.com`, rechaza
+cualquier método o ruta fuera de las reglas, no sigue redirecciones y oculta la llave si la
+respuesta la trae. Puedes probar la misma llamada con
+`cemi api call stripe#secret -e prod GET /v1/balance`.
+
+Con programas funciona igual. En `cemi.toml`, la variable que lleva la dirección de la API:
+
+```toml
+[env]
+STRIPE_SECRET_KEY = "stripe#secret"
+
+[proxy]
+STRIPE_API_BASE = "stripe#secret"
+```
+
+`cemi run --proxy -e prod -- npm test` arranca un proxy en `127.0.0.1` para esa corrida.
+`STRIPE_SECRET_KEY` recibe un marcador y `STRIPE_API_BASE` la dirección del proxy, que cambia el
+marcador por la llave. El `run` de una IA en un ambiente protegido siempre funciona así, y falla
+si algún secreto del comando no tiene API. El programa tiene que leer la dirección de la API de
+una variable; la mayoría de los SDK aceptan una URL base.
 
 ## Rotar una llave en todos lados
 
@@ -264,7 +296,7 @@ cemi scan --history      # busca tus valores en todo el historial de git
 | Ambientes | `env ls/add/rm/diff/protect/unprotect` |
 | Rotación | `origin set/rm`, `dest add/ls/rm`, `verify`, `push`, `check`, `rotate`, `revoke`, `incident`, `approve` |
 | Proyecto | `preset ls/add`, `link`, `var add/rm/ls`, `project ls/add/rm`, `run`, `types`, `ci setup/export/load`, `export`, `import` (`--discover` para todos tus proyectos) |
-| IA | `token create/ls/revoke`, `mcp serve/setup/add/launch/ls/rm` |
+| IA | `token create/ls/revoke`, `mcp serve/setup/add/launch/ls/rm`, `api add/ls/rm/call`, `run --proxy` |
 | Git | `scan`, `hook install` |
 
 Las referencias tienen la forma `[global:|local:]entidad/registro#campo`.

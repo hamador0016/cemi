@@ -15,6 +15,7 @@ pub mod mcp;
 pub mod model;
 pub mod presets;
 pub mod project;
+pub mod proxy;
 pub mod refs;
 pub mod resolve;
 pub mod rotation;

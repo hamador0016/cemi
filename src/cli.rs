@@ -228,6 +228,10 @@ pub enum Cmd {
         /// Hide secret values in the output (the command loses its terminal)
         #[arg(long)]
         redact: bool,
+        /// Secrets that have an API (`cemi api add`) go through Cemí's proxy: the
+        /// command gets a placeholder, and [proxy] variables get the proxy's address
+        #[arg(long)]
+        proxy: bool,
         #[arg(trailing_var_arg = true, required = true, value_name = "COMMAND")]
         command: Vec<String>,
     },
@@ -289,6 +293,9 @@ pub enum Cmd {
     /// Places a value is copied to: GitHub, Supabase, .env files, commands…
     #[command(subcommand)]
     Dest(DestCmd),
+    /// HTTP APIs a key signs in to, called through Cemí's proxy without handing out the key
+    #[command(subcommand)]
+    Api(ApiCmd),
     /// Set a command that checks a value works (it gets the value on stdin)
     Verify {
         /// record#field
@@ -722,6 +729,60 @@ pub enum DestKind {
         set: Vec<String>,
         #[arg(long = "secret", value_name = "KEY=REF")]
         secret: Vec<String>,
+    },
+}
+
+#[derive(Subcommand)]
+pub enum ApiCmd {
+    /// cemi api add acme/shop/stripe#secret -e prod --base https://api.stripe.com --auth bearer --allow "GET /v1/**"
+    #[command(
+        after_help = "Rules: METHOD PATH, where * matches inside one path segment and ** any number of segments.
+          --allow \"GET /v1/**\"            every GET under /v1
+          --allow \"POST /v1/refunds\"      one path
+          --allow \"* /rest/v1/orders*\"    any method
+        Auth: bearer (Authorization: Bearer KEY), basic (KEY as the user name), header:NAME, query:NAME"
+    )]
+    Add {
+        /// record#field with the key
+        #[arg(add = ArgValueCompleter::new(crate::complete::references))]
+        reference: String,
+        /// Environment whose value is used (default: the value shared by all)
+        #[arg(short, long, add = ArgValueCompleter::new(crate::complete::envs))]
+        env: Option<String>,
+        /// The API's address, like https://api.stripe.com. Requests never go anywhere else
+        #[arg(long)]
+        base: String,
+        /// Where the key goes in each request (repeat for more than one place)
+        #[arg(long, default_value = "bearer")]
+        auth: Vec<String>,
+        /// Allowed calls, like "GET /v1/**" (repeat it; nothing else is allowed)
+        #[arg(long, required = true)]
+        allow: Vec<String>,
+    },
+    /// APIs of one field, or of all
+    Ls { reference: Option<String> },
+    /// Forget an API
+    Rm {
+        #[arg(add = ArgValueCompleter::new(crate::complete::references))]
+        reference: String,
+        /// Id from `cemi api ls`
+        id: String,
+    },
+    /// Call an API through the proxy, as an AI client would: cemi api call stripe#secret -e prod GET /v1/balance
+    Call {
+        #[arg(add = ArgValueCompleter::new(crate::complete::references))]
+        reference: String,
+        #[arg(short, long, add = ArgValueCompleter::new(crate::complete::envs))]
+        env: Option<String>,
+        method: String,
+        /// Path and query, like /v1/charges?limit=3
+        path: String,
+        /// Request body (@FILE reads a file)
+        #[arg(long)]
+        data: Option<String>,
+        /// Extra header, NAME:VALUE
+        #[arg(short = 'H', long = "header", value_name = "NAME:VALUE")]
+        header: Vec<String>,
     },
 }
 

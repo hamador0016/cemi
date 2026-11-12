@@ -1,5 +1,6 @@
 //! Command implementations.
 
+mod api_cmds;
 mod ci_cmds;
 mod mcp_cmds;
 mod memory;
@@ -193,6 +194,7 @@ fn writes(cmd: &Cmd) -> bool {
         | Cmd::Lock => false,
         Cmd::Env(EnvCmd::Ls { .. } | EnvCmd::Diff { .. }) => false,
         Cmd::Dest(DestCmd::Ls { .. }) | Cmd::Check { .. } => false,
+        Cmd::Api(ApiCmd::Ls { .. } | ApiCmd::Call { .. }) => false,
         Cmd::Incident { rotate, .. } => *rotate,
         Cmd::Task(TaskCmd::Ls) => false,
         Cmd::Preset(PresetCmd::Ls) => false,
@@ -330,8 +332,9 @@ pub fn run(cli: Cli) -> Result<i32> {
         C::Run {
             env,
             redact,
+            proxy,
             command,
-        } => project_cmds::run(ctx, env.as_deref(), redact, &command),
+        } => project_cmds::run(ctx, env.as_deref(), redact, proxy, &command),
         C::Export { output } => project_cmds::export(&mut ctx, output),
         C::Types {
             format,
@@ -375,6 +378,7 @@ pub fn run(cli: Cli) -> Result<i32> {
         }
         C::Origin(c) => rotation_cmds::origin(&mut ctx, c),
         C::Dest(c) => rotation_cmds::dest(&mut ctx, c),
+        C::Api(c) => api_cmds::api(&mut ctx, c),
         C::Verify {
             reference,
             env,

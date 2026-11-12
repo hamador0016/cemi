@@ -131,9 +131,29 @@ pub fn var(ctx: &mut Ctx, cmd: VarCmd) -> Result<i32> {
     }
 }
 
-pub fn run(mut ctx: Ctx, env: Option<&str>, redact: bool, command: &[String]) -> Result<i32> {
+pub fn run(
+    mut ctx: Ctx,
+    env: Option<&str>,
+    redact: bool,
+    proxy: bool,
+    command: &[String],
+) -> Result<i32> {
     let project = ctx.require_project()?;
-    let plan = runner::plan(&mut ctx.ws, &project, env)?;
+    let mut plan = runner::plan(&mut ctx.ws, &project, env)?;
+    let proxy = if proxy {
+        let p = crate::proxy::for_run(&mut ctx.ws, &project, env, &mut plan, false, "run")?;
+        for n in &p.notes {
+            ui::ok(format!("proxy: {n}"));
+        }
+        if p.notes.is_empty() {
+            ui::warn(
+                "no variable goes through the proxy: give a key an API with `cemi api add`, and list address variables under [proxy] in cemi.toml",
+            );
+        }
+        Some(p)
+    } else {
+        None
+    };
     // Audit, then release the vault before the command starts: it may run for hours.
     for scope in [Scope::Global, Scope::Local] {
         if ctx.ws.get(scope).is_some() {
@@ -154,7 +174,9 @@ pub fn run(mut ctx: Ctx, env: Option<&str>, redact: bool, command: &[String]) ->
     };
     let prepared = runner::prepare(&plan)?;
     drop(plan);
-    runner::run_interactive(command, &prepared, redactor.as_ref())
+    let code = runner::run_interactive(command, &prepared, redactor.as_ref());
+    drop(proxy);
+    code
 }
 
 pub fn export(ctx: &mut Ctx, output: Option<std::path::PathBuf>) -> Result<i32> {

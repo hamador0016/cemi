@@ -301,6 +301,16 @@ pub fn record_summary(v: &Vault, rec: &Record) -> String {
         for (env, cmd) in &f.verify {
             let _ = writeln!(out, "    checked by ({}): {}", env_name(env), cmd.join(" "));
         }
+        for a in &f.apis {
+            let _ = writeln!(
+                out,
+                "    API ({}): {}, allowed: {} [{}]",
+                env_name(&a.env),
+                a.base,
+                a.allow.join(", "),
+                a.id
+            );
+        }
     }
     let envs = v.effective_envs(&rec.entity);
     if !envs.is_empty() {

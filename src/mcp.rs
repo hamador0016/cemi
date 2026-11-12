@@ -78,6 +78,25 @@ pub struct RunParams {
     pub env: String,
 }
 
+#[derive(Deserialize, schemars::JsonSchema)]
+pub struct CallApiParams {
+    /// "record#field" of the key. The API's address and allowed calls are set
+    /// by the human (`show` lists them).
+    pub reference: String,
+    /// Environment, like "prod".
+    pub env: String,
+    /// GET, POST, PUT, PATCH, DELETE, HEAD or OPTIONS.
+    pub method: String,
+    /// Path and query after the API's address, like "/v1/charges?limit=3".
+    pub path: String,
+    /// Request body, usually JSON.
+    #[serde(default)]
+    pub body: Option<String>,
+    /// Extra headers. Cemí always sets the key itself.
+    #[serde(default)]
+    pub headers: Option<std::collections::BTreeMap<String, String>>,
+}
+
 #[derive(Deserialize, schemars::JsonSchema, Default)]
 pub struct CheckParams {
     /// "record#field". Omit to check every destination you can see.
@@ -597,6 +616,39 @@ impl CemiServer {
         }
     }
 
+    fn do_call_api(&self, p: CallApiParams) -> Result<String> {
+        let mut a = self.access(false)?;
+        a.require(Permission::Api)?;
+        a.require_env(Some(&p.env))?;
+        let fr = a.field(&p.reference)?;
+        let name = fr.text(&mut a.ws);
+        let up = crate::proxy::upstream_for(&mut a.ws, &fr, Some(&p.env))?;
+        let mut headers: Vec<(String, String)> =
+            p.headers.unwrap_or_default().into_iter().collect();
+        let body = p.body.unwrap_or_default().into_bytes();
+        if !body.is_empty()
+            && !headers
+                .iter()
+                .any(|(k, _)| k.eq_ignore_ascii_case("content-type"))
+        {
+            headers.push(("content-type".into(), "application/json".into()));
+        }
+        let method = p.method.to_ascii_uppercase();
+        let shown_path = p.path.split('?').next().unwrap_or("").to_string();
+        let result = up.forward(&method, &p.path, &headers, body);
+        let outcome = match &result {
+            Ok(r) => r.status.to_string(),
+            Err(_) => "refused or failed".into(),
+        };
+        a.audit(
+            "api.call",
+            Some(name),
+            Some(&p.env),
+            Some(format!("{method} {shown_path} → {outcome}")),
+        );
+        Ok(result?.summary(32 * 1024))
+    }
+
     fn do_run(&self, p: RunParams) -> Result<String> {
         let path = workspace::find_project_file(&self.cwd)
             .ok_or_else(|| anyhow!("there is no cemi.toml in this project"))?;
@@ -635,7 +687,22 @@ impl CemiServer {
         let mut a = self.access(false)?;
         a.require(Permission::Run)?;
         a.require_env(Some(&p.env))?;
-        let plan = runner::plan(&mut a.ws, &project, Some(&p.env))?;
+        let mut plan = runner::plan(&mut a.ws, &project, Some(&p.env))?;
+        // In a protected environment the command never gets a key: every
+        // secret has to go through the proxy.
+        let protected = !rotation::needs_approval(&mut a.ws, Some(&p.env), &[]).is_empty();
+        let proxy = if protected {
+            Some(crate::proxy::for_run(
+                &mut a.ws,
+                &project,
+                Some(&p.env),
+                &mut plan,
+                true,
+                &format!("mcp:{}", a.token.name),
+            )?)
+        } else {
+            None
+        };
         a.audit(
             "run",
             Some(p.command.clone()),
@@ -655,6 +722,7 @@ impl CemiServer {
             timeout,
             32 * 1024,
         )?;
+        drop(proxy);
         let mut s = String::new();
         if out.timed_out {
             s.push_str(&format!("Stopped after {} seconds.\n", timeout.as_secs()));
@@ -722,6 +790,13 @@ impl CemiServer {
     }
 
     #[tool(
+        description = "Call an HTTP API with a key you never receive: Cemí adds the key and sends the request to the API's own address, if the human allowed that method and path. Use it to test production APIs. The key is hidden in the answer."
+    )]
+    fn call_api(&self, Parameters(p): Parameters<CallApiParams>) -> CallToolResult {
+        self.do_call_api(p).map(text).unwrap_or_else(failure)
+    }
+
+    #[tool(
         description = "Check where secrets are copied (GitHub, Supabase, .env files…): up to date, out of date, changed outside Cemí, or missing. Never shows values."
     )]
     fn check(&self, Parameters(p): Parameters<CheckParams>) -> CallToolResult {
@@ -748,9 +823,10 @@ impl ServerHandler for CemiServer {
     fn get_info(&self) -> ServerConfig {
         ServerConfig::new(ServerCapabilities::builder().enable_tools().build()).with_instructions(
             "Cemí keeps the user's API keys and secrets. You can see names, notes and status, \
-             generate new secrets, run allowed project commands with secrets injected, check and \
-             update the places where secrets are copied, and rotate leaked keys, but you never \
-             receive secret values. Changes in protected environments wait for the human to run \
+             generate new secrets, run allowed project commands with secrets injected, call HTTP \
+             APIs with keys that Cemí adds (`call_api`), check and update the places where \
+             secrets are copied, and rotate leaked keys, but you never receive secret values. In \
+             protected environments, `run` only works when every secret goes through Cemí's proxy. Changes in protected environments wait for the human to run \
              `cemi approve <id>`. Never ask the user to paste a secret into the chat: tell them to \
              run `cemi set <record>#<field>` in their terminal instead.",
         )

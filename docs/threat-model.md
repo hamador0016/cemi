@@ -24,7 +24,8 @@ production secrets.
 | Forgotten password | Recovery code (256 bits) created with every vault. `cemi recovery verify` checks it. |
 | A leaked key keeps working | `cemi rotate` / `cemi incident --rotate` replace it at its origin and in every destination, then revoke the old one (telling the provider it leaked when the API allows it). |
 | A prompt-injected AI changes production | Pushes, rotations and revocations in protected environments (`prod`, `production` by default) need the vault password typed by a person. Through MCP they only create a request for `cemi approve`, which expires in one hour and works once. A token limited to some environments cannot rotate a value shared by all of them. |
-| An AI sends a secret somewhere new | Destinations and origins are set only from the command line, never through MCP. Values travel only over HTTPS (plain http is refused except for localhost). |
+| An AI sends a secret somewhere new | Destinations, origins and API addresses are set only from the command line, never through MCP. Giving a key of a protected environment an API address needs the password. Values travel only over HTTPS (plain http is refused except for localhost). |
+| An AI needs a production key to test an API | The credential proxy (MCP `call_api`, `cemi run --proxy`) adds the key itself and sends the request only to the API's address, only for the methods and paths allowed with `cemi api add`. Paths with `..`, encoded slashes or backslashes are refused, redirects are not followed, and the key is hidden in answers. The local proxy listens on 127.0.0.1 under a random path that only the command it serves knows. |
 | A failed rotation breaks a service | The new value is saved as pending before anything changes. If a destination or the `verify` check fails, the old value is written back to every destination already changed, and the unused new key is deleted at the provider. |
 | Someone with the repository reads the CI secrets | `cemi.ci.age` is encrypted with age to a key made only for CI, kept in the CI's secret store (`CEMI_CI_KEY`). It holds only the variables of one environment, and only those chosen with `--only` or `[ci] vars`. Exporting a protected environment asks for the password. In GitHub Actions every value is masked in the log. If the CI key leaks, the values in every copy of the file in git history are exposed: replace the key and those values. |
 
@@ -34,8 +35,9 @@ production secrets.
    form the redactor does not know, write it to a file, or send it over the network. This is
    true for every tool that injects secrets. Cemí limits it (allowlisted commands, chosen
    environments), but if an AI can edit the script that an allowed command runs, it can make
-   that script leak the secret. Do not allow AI `run` in production until the credential proxy
-   (v0.4) exists, and treat any secret an AI could have reached as exposed: rotate it.
+   that script leak the secret. In protected environments an AI's `run` only works when every
+   secret goes through the credential proxy. Treat any secret an AI could have reached as
+   exposed: rotate it.
 2. **Malware running as your user while the vault is unlocked.** It can read the session from
    the operating system's credential store, or simply run `cemi`. Lock the vault (`cemi lock`)
    when you do not need it; sessions expire after 15 minutes of inactivity.
@@ -47,7 +49,10 @@ production secrets.
 7. **Connectors you install.** A `command` origin or destination and an external
    `cemi-connector-<name>` program receive values (that is their job). Use only programs you
    trust, as you would with a git credential helper.
-8. **Providers that cannot revoke.** Without an origin that supports it, the old key is revoked by
+8. **Calls the rules allow.** The proxy keeps the key away from the caller, not the damage a
+   call can do: with `POST /v1/refunds` allowed, an AI can make refunds. Allow only what the
+   task needs, and prefer keys with limited permissions at the provider.
+9. **Providers that cannot revoke.** Without an origin that supports it, the old key is revoked by
    hand; Cemí says so and keeps it as an archived version.
 
 ## Design rules

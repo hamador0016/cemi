@@ -182,6 +182,10 @@ pub struct Field {
     /// Command that checks a value works, per slot. Gets the value on stdin.
     #[serde(default, skip_serializing_if = "BTreeMap::is_empty")]
     pub verify: BTreeMap<String, Vec<String>>,
+    /// HTTP APIs this value signs in to, called through Cemí's proxy so the
+    /// caller never holds the value.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub apis: Vec<Api>,
 }
 
 impl Field {
@@ -194,6 +198,7 @@ impl Field {
             origins: BTreeMap::new(),
             destinations: Vec::new(),
             verify: BTreeMap::new(),
+            apis: Vec::new(),
         }
     }
 
@@ -239,6 +244,75 @@ impl Destination {
     /// The environment to resolve the value with.
     pub fn env_opt(&self) -> Option<&str> {
         (self.env != SHARED).then_some(self.env.as_str())
+    }
+}
+
+/// An HTTP API that a value signs in to. Cemí's proxy adds the value to
+/// requests for `base`, and only for the methods and paths in `allow`.
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+pub struct Api {
+    /// Short id, unique within the field.
+    pub id: String,
+    /// Environment whose value is used, or [`SHARED`].
+    pub env: String,
+    /// `https://host[/path]`. Requests never go anywhere else.
+    pub base: String,
+    /// Where the value goes in each request.
+    pub auth: Vec<ApiAuth>,
+    /// Rules like `GET /v1/*`. Nothing else is allowed.
+    pub allow: Vec<String>,
+    pub created: Timestamp,
+}
+
+impl Api {
+    pub fn env_opt(&self) -> Option<&str> {
+        (self.env != SHARED).then_some(self.env.as_str())
+    }
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(tag = "kind", rename_all = "snake_case")]
+pub enum ApiAuth {
+    /// `Authorization: Bearer <value>`
+    Bearer,
+    /// `<name>: <value>`
+    Header { name: String },
+    /// HTTP basic authentication with the value as the user name and an
+    /// empty password (Stripe's style).
+    Basic,
+    /// `?<name>=<value>` in the URL.
+    Query { name: String },
+}
+
+impl fmt::Display for ApiAuth {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        match self {
+            ApiAuth::Bearer => f.write_str("bearer"),
+            ApiAuth::Header { name } => write!(f, "header:{name}"),
+            ApiAuth::Basic => f.write_str("basic"),
+            ApiAuth::Query { name } => write!(f, "query:{name}"),
+        }
+    }
+}
+
+impl std::str::FromStr for ApiAuth {
+    type Err = anyhow::Error;
+
+    fn from_str(s: &str) -> anyhow::Result<ApiAuth> {
+        let valid_name = |n: &str| {
+            !n.is_empty()
+                && n.chars()
+                    .all(|c| c.is_ascii_alphanumeric() || "-_.".contains(c))
+        };
+        Ok(match s.split_once(':') {
+            None if s == "bearer" => ApiAuth::Bearer,
+            None if s == "basic" => ApiAuth::Basic,
+            Some(("header", n)) if valid_name(n) => ApiAuth::Header { name: n.into() },
+            Some(("query", n)) if valid_name(n) => ApiAuth::Query { name: n.into() },
+            _ => {
+                anyhow::bail!("--auth must be bearer, basic, header:NAME or query:NAME, got {s:?}")
+            }
+        })
     }
 }
 
@@ -426,6 +500,9 @@ pub enum Permission {
     /// Replace a key: create, propagate, verify, revoke the old one
     /// (protected environments still need a person's approval).
     Rotate,
+    /// Call HTTP APIs through Cemí's proxy, within each API's rules, without
+    /// receiving the key.
+    Api,
 }
 
 impl fmt::Display for Permission {
@@ -436,6 +513,7 @@ impl fmt::Display for Permission {
             Permission::Run => "run",
             Permission::Push => "push",
             Permission::Rotate => "rotate",
+            Permission::Api => "api",
         })
     }
 }
