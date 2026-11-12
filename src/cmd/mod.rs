@@ -15,7 +15,8 @@ use anyhow::Result;
 
 use crate::audit::{self, Event};
 use crate::cli::{Cli, Cmd};
-use crate::model::Record;
+use crate::model::{ApproveWith, Record};
+use crate::presence::Check;
 use crate::project::Project;
 use crate::refs::{self, Ref, VaultSel};
 use crate::ui;
@@ -132,6 +133,21 @@ impl Ctx {
 /// Asks for the master password again: before showing a secret, or changing
 /// a protected environment. A person has to type it; AI clients cannot.
 pub(crate) fn reauthenticate(ctx: &Ctx, scope: Scope, why: &str) -> Result<()> {
+    if !ui::password_from_stdin() && approve_with(ctx, scope) == ApproveWith::Device {
+        match crate::presence::verify(&format!("Cemí: {why}")) {
+            Check::Verified => return Ok(()),
+            Check::Refused => {
+                return Err(crate::errors::locked(format!(
+                    "not confirmed with {}",
+                    crate::presence::name()
+                )));
+            }
+            Check::Unavailable(reason) => ui::warn(format!(
+                "{}: {reason}. Asking for the password instead",
+                crate::presence::name()
+            )),
+        }
+    }
     let dir = ctx.ws.dir(scope)?;
     let header = Header::read(&dir)?;
     let (header, label) = if header.password.is_some() {
@@ -144,6 +160,50 @@ pub(crate) fn reauthenticate(ctx: &Ctx, scope: Scope, why: &str) -> Result<()> {
         return Err(crate::errors::locked("wrong password"));
     }
     Ok(())
+}
+
+/// How a person confirms changes for a vault: its own setting, or the global
+/// vault's when the vault has none (a local vault opened by the global one).
+pub(crate) fn approve_with(ctx: &Ctx, scope: Scope) -> ApproveWith {
+    let own = ctx.ws.get(scope).and_then(|v| v.root().approve_with);
+    let global = ctx
+        .ws
+        .get(Scope::Global)
+        .and_then(|v| v.root().approve_with);
+    own.or(global).unwrap_or(ApproveWith::Password)
+}
+
+/// `cemi tray`: watches the global vault, the local vault of this folder and
+/// of each `--project`, without opening any of them.
+fn tray(projects: &[std::path::PathBuf], foreground: bool) -> Result<i32> {
+    use crate::tray::Watched;
+    let ws = Workspace::new(false)?;
+    let home = std::env::var_os(if cfg!(windows) { "USERPROFILE" } else { "HOME" })
+        .map(std::path::PathBuf::from)
+        .unwrap_or_else(|| ws.cwd.clone());
+    let mut watched = vec![Watched {
+        vault_dir: ws.global_dir.clone(),
+        run_in: home,
+    }];
+    let mut folders = vec![ws.cwd.clone()];
+    folders.extend(
+        projects
+            .iter()
+            .map(|p| std::path::absolute(p).unwrap_or(p.clone())),
+    );
+    for f in folders {
+        let at = Workspace::at(&f, false)?;
+        if let Some(local) = at.local_dir
+            && !watched.iter().any(|w| w.vault_dir == local)
+        {
+            let run_in = local.parent().map(|p| p.to_path_buf()).unwrap_or(f.clone());
+            watched.push(Watched {
+                vault_dir: local,
+                run_in,
+            });
+        }
+    }
+    crate::tray::run(watched, foreground)
 }
 
 /// The line that turns on completion in a shell. The shell asks `cemi`
@@ -240,6 +300,7 @@ pub fn run(cli: Cli) -> Result<i32> {
             Cmd::Ci(crate::cli::CiCmd::Load { .. }) => Some(("ci load", OTHER)),
             Cmd::Reveal { .. } => Some(("reveal", "it prints the value alone, ready for a script")),
             Cmd::ClipboardHelper { .. } => Some(("__clipboard", OTHER)),
+            Cmd::Tray { .. } => Some(("tray", OTHER)),
             _ => None,
         };
         if let Some((name, why)) = name {
@@ -254,6 +315,13 @@ pub fn run(cli: Cli) -> Result<i32> {
     }) = &cli.command
     {
         return ci_cmds::load(file.clone(), *github_env, command);
+    }
+    if let Cmd::Tray {
+        projects,
+        foreground,
+    } = &cli.command
+    {
+        return tray(projects, *foreground);
     }
     if let crate::cli::Cmd::Completion { shell } = cli.command {
         print_completion_setup(shell);
@@ -441,6 +509,8 @@ pub fn run(cli: Cli) -> Result<i32> {
             yes,
         } => rotation_cmds::incident(&mut ctx, &references, env.as_deref(), rotate, yes),
         C::Approve { id, deny } => rotation_cmds::approve(&mut ctx, id.as_deref(), deny),
+        C::ApproveWith { method } => rotation_cmds::approve_with(&mut ctx, method),
+        C::Tray { .. } => unreachable!("handled before opening anything"),
         C::Token(c) => mcp_cmds::token(&mut ctx, c),
         C::Mcp(c) => mcp_cmds::mcp(ctx, c),
         C::Log { limit, verify } => vault_cmds::log(&mut ctx, limit, verify),

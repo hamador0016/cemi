@@ -283,6 +283,21 @@ Cemí has not noted are not searched; `cemi project ls` shows the ones it knows.
 warns when a `cemi.ci.age` holds an old value, and `cemi rotate` lists the ones to export again.
 AI assistants get the same list from the MCP `show` tool, without values.
 
+## Approvals
+
+Changes an AI asks for in a protected environment wait for you. Confirm them with Windows Hello
+or Touch ID instead of the password:
+
+```bash
+cemi approve-with device
+cemi tray          # Windows: an icon that tells you when an AI asks for approval
+```
+
+`cemi approve` lists the requests and, in a terminal, lets you pick one; the plan is shown before
+you confirm. Clicking the tray icon opens that list. The tray reads only how many requests are
+waiting, so it never opens the vault or keeps it unlocked. On Linux, and wherever Windows Hello or
+Touch ID is not set up, Cemí asks for the password. The tray icon is only available on Windows.
+
 ## Never commit a secret
 
 ```bash
@@ -301,7 +316,7 @@ Unlike pattern scanners, `cemi scan` looks for *your* values, whatever their for
 | Values | `set`, `generate`, `copy` (no argument: search and pick), `reveal`, `history`, `revert` |
 | Memory | `note`, `task`, `deps` (every project that uses a value), `doc` |
 | Environments | `env ls/add/rm/diff/protect/unprotect` |
-| Rotation | `origin set/rm`, `dest add/ls/rm`, `verify`, `push`, `check`, `rotate`, `revoke`, `incident`, `approve` |
+| Rotation | `origin set/rm`, `dest add/ls/rm`, `verify`, `push`, `check`, `rotate`, `revoke`, `incident`, `approve`, `approve-with`, `tray` |
 | Project | `preset ls/add`, `link`, `var add/rm/ls`, `project ls/add/rm`, `run`, `types`, `ci setup/export/load`, `export`, `import` (`--discover` for every project) |
 | AI | `token create/ls/revoke`, `mcp serve/setup/add/launch/ls/rm`, `api add/ls/rm/call`, `run --proxy` |
 | Git | `scan`, `hook install` |

@@ -30,7 +30,7 @@ pub fn use_password_stdin() {
     *PASSWORD_STDIN.lock().expect("not poisoned") = true;
 }
 
-fn password_from_stdin() -> bool {
+pub fn password_from_stdin() -> bool {
     *PASSWORD_STDIN.lock().expect("not poisoned")
 }
 

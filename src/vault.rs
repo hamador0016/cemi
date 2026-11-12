@@ -230,9 +230,16 @@ pub struct Vault {
     pub unreadable: Vec<String>,
     dirty: BTreeSet<String>,
     deleted: BTreeSet<String>,
+    /// Requests were added or removed since the last save (see [`REQUESTS_FILE`]).
+    approvals_touched: bool,
     write: bool,
     _lock: File,
 }
+
+/// Holds only the number of requests waiting for `cemi approve`, so `cemi
+/// tray` can notice new ones without opening the vault. Local to this
+/// computer.
+pub const REQUESTS_FILE: &str = "requests";
 
 pub struct Created {
     pub vault: Vault,
@@ -301,6 +308,7 @@ impl Vault {
             memory: BTreeMap::new(),
             tasks: Vec::new(),
             protected: None,
+            approve_with: None,
             created: now,
             updated: now,
         };
@@ -317,6 +325,7 @@ impl Vault {
             unreadable: Vec::new(),
             dirty: BTreeSet::new(),
             deleted: BTreeSet::new(),
+            approvals_touched: false,
             write: true,
             _lock: lock,
         };
@@ -369,6 +378,7 @@ impl Vault {
             unreadable: Vec::new(),
             dirty: BTreeSet::new(),
             deleted: BTreeSet::new(),
+            approvals_touched: false,
             write,
             _lock: lock,
         };
@@ -479,6 +489,18 @@ impl Vault {
             if path.exists() {
                 fs::remove_file(&path)?;
             }
+        }
+        if std::mem::take(&mut self.approvals_touched) {
+            let now = jiff::Timestamp::now();
+            let waiting = self.approvals.values().filter(|a| a.expires > now).count();
+            atomic_write(
+                &self.dir.join(REQUESTS_FILE),
+                format!(
+                    "{waiting}
+"
+                )
+                .as_bytes(),
+            )?;
         }
         Ok(())
     }
@@ -610,6 +632,7 @@ impl Vault {
                         memory: BTreeMap::new(),
                         tasks: Vec::new(),
                         protected: None,
+                        approve_with: None,
                         created: now,
                         updated: now,
                     };
@@ -836,11 +859,13 @@ impl Vault {
     // ----- approvals and protected environments -----
 
     pub fn put_approval(&mut self, a: Approval) {
+        self.approvals_touched = true;
         self.dirty.insert(a.id.clone());
         self.approvals.insert(a.id.clone(), a);
     }
 
     pub fn delete_approval(&mut self, id: &str) {
+        self.approvals_touched = true;
         self.approvals.remove(id);
         self.dirty.remove(id);
         self.deleted.insert(id.to_string());

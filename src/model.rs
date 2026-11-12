@@ -70,8 +70,23 @@ pub struct Entity {
     /// approval. `None` means the default ([`DEFAULT_PROTECTED`]).
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub protected: Option<Vec<String>>,
+    /// Only on the root entity: how a person confirms approvals and changes
+    /// in protected environments. `None` means the password.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub approve_with: Option<ApproveWith>,
     pub created: Timestamp,
     pub updated: Timestamp,
+}
+
+/// How a person confirms what an AI cannot: approvals, changes in protected
+/// environments, showing a value.
+#[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq, clap::ValueEnum)]
+#[serde(rename_all = "snake_case")]
+pub enum ApproveWith {
+    /// Type the vault password.
+    Password,
+    /// Windows Hello or Touch ID (the password still works with --password-stdin).
+    Device,
 }
 
 /// Environments protected when a vault has not chosen its own.

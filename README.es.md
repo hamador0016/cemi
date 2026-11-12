@@ -283,6 +283,22 @@ Los proyectos que Cemí no ha anotado no se revisan; `cemi project ls` muestra l
 hay que exportar de nuevo. Los asistentes de IA reciben la misma lista con la herramienta MCP
 `show`, sin valores.
 
+## Aprobaciones
+
+Los cambios que una IA pide en un ambiente protegido te esperan. Confírmalos con Windows Hello o
+Touch ID en vez de la contraseña:
+
+```bash
+cemi approve-with device
+cemi tray          # Windows: un ícono que avisa cuando una IA pide aprobación
+```
+
+`cemi approve` muestra las solicitudes y, en una terminal, te deja elegir una; el plan aparece
+antes de confirmar. Al hacer clic en el ícono se abre esa lista. El ícono solo lee cuántas
+solicitudes esperan, así que nunca abre la bóveda ni la deja abierta. En Linux, y donde Windows
+Hello o Touch ID no estén configurados, Cemí pide la contraseña. El ícono de la bandeja solo
+existe en Windows.
+
 ## Nunca subir un secreto
 
 ```bash
@@ -299,7 +315,7 @@ cemi scan --history      # busca tus valores en todo el historial de git
 | Valores | `set`, `generate`, `copy` (sin argumento: buscar y elegir), `reveal`, `history`, `revert` |
 | Memoria | `note`, `task`, `deps` (todos los proyectos que usan un valor), `doc` |
 | Ambientes | `env ls/add/rm/diff/protect/unprotect` |
-| Rotación | `origin set/rm`, `dest add/ls/rm`, `verify`, `push`, `check`, `rotate`, `revoke`, `incident`, `approve` |
+| Rotación | `origin set/rm`, `dest add/ls/rm`, `verify`, `push`, `check`, `rotate`, `revoke`, `incident`, `approve`, `approve-with`, `tray` |
 | Proyecto | `preset ls/add`, `link`, `var add/rm/ls`, `project ls/add/rm`, `run`, `types`, `ci setup/export/load`, `export`, `import` (`--discover` para todos tus proyectos) |
 | IA | `token create/ls/revoke`, `mcp serve/setup/add/launch/ls/rm`, `api add/ls/rm/call`, `run --proxy` |
 | Git | `scan`, `hook install` |

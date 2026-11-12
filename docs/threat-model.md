@@ -23,7 +23,7 @@ production secrets.
 | A secret shows up in command output | `run --redact` and MCP `run` replace values and their base64, base64url, hex and URL-encoded forms. |
 | Forgotten password | Recovery code (256 bits) created with every vault. `cemi recovery verify` checks it. |
 | A leaked key keeps working | `cemi rotate` / `cemi incident --rotate` replace it at its origin and in every destination, then revoke the old one (telling the provider it leaked when the API allows it). |
-| A prompt-injected AI changes production | Pushes, rotations and revocations in protected environments (`prod`, `production` by default) need the vault password typed by a person. Through MCP they only create a request for `cemi approve`, which expires in one hour and works once. A token limited to some environments cannot rotate a value shared by all of them. |
+| A prompt-injected AI changes production | Pushes, rotations and revocations in protected environments (`prod`, `production` by default) need the vault password typed by a person, or Windows Hello / Touch ID after `cemi approve-with device`. Through MCP they only create a request for `cemi approve`, which expires in one hour and works once. A token limited to some environments cannot rotate a value shared by all of them. |
 | An AI sends a secret somewhere new | Destinations, origins and API addresses are set only from the command line, never through MCP. Giving a key of a protected environment an API address needs the password. Values travel only over HTTPS (plain http is refused except for localhost), or over SSH with your own `ssh`, which checks the server's host key. |
 | An AI needs a production key to test an API | The credential proxy (MCP `call_api`, `cemi run --proxy`) adds the key itself and sends the request only to the API's address, only for the methods and paths allowed with `cemi api add`. Paths with `..`, encoded slashes or backslashes are refused, redirects are not followed, and the key is hidden in answers. The local proxy listens on 127.0.0.1 under a random path that only the command it serves knows. |
 | A failed rotation breaks a service | The new value is saved as pending before anything changes. If a destination or the `verify` check fails, the old value is written back to every destination already changed, and the unused new key is deleted at the provider. |
@@ -43,7 +43,8 @@ production secrets.
    when you do not need it; sessions expire after 15 minutes of inactivity.
 3. **A weak master password.** Argon2id slows guessing down; it cannot save `123456`.
 4. **Losing both the password and the recovery code.** Nobody can open the vault, by design.
-5. **An AI with control of your desktop** can type in your terminal like you.
+5. **An AI with control of your desktop** can type in your terminal like you. With
+   `cemi approve-with device`, approvals need a face, a fingerprint or the device PIN.
 6. **The audit log against someone with write access to the folder.** The chain detects removed
    or reordered lines, not a full rewrite.
 7. **Connectors you install.** A `command` origin or destination and an external
@@ -64,8 +65,8 @@ production secrets.
 - No invented cryptography: age (X25519, ChaCha20-Poly1305), Argon2id, XChaCha20-Poly1305,
   SHA-256, all from audited RustCrypto/age crates.
 - Secret material is wiped from memory when dropped (`zeroize`) where the libraries allow it.
-- Debug-only switches (`CEMI_INSECURE_FAST_KDF`, `CEMI_TEST_SESSION_DIR`) do nothing in release
-  builds.
+- Debug-only switches (`CEMI_INSECURE_FAST_KDF`, `CEMI_TEST_SESSION_DIR`, `CEMI_TEST_PRESENCE`)
+  do nothing in release builds.
 - Only dependencies with permissive licenses (checked with `cargo deny`).
 - Known advisories fail the build. The only exceptions are listed in `deny.toml` with the reason:
   today, `crypto-bigint` 0.5 (timing issues) and `basic-toml` (unmaintained), both pulled in by

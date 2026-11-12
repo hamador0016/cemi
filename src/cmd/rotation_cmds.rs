@@ -913,12 +913,51 @@ pub fn approve(ctx: &mut Ctx, id: Option<&str>, deny: bool) -> Result<i32> {
         ui::data(json!({ "requests": requests }));
         if n == 0 {
             crate::outln!("No requests waiting.");
-        } else {
+            return Ok(0);
+        }
+        let pick = std::io::IsTerminal::is_terminal(&std::io::stdin())
+            && std::io::IsTerminal::is_terminal(&std::io::stderr())
+            && !ui::json_mode()
+            && !ui::password_from_stdin();
+        if !pick {
             crate::outln!(
                 "\nApprove one with `cemi approve <id>`, or refuse it with `cemi approve <id> --deny`."
             );
+            return Ok(0);
         }
-        return Ok(0);
+        let ids: Vec<String> = requests
+            .iter()
+            .filter_map(|r| r["id"].as_str().map(str::to_string))
+            .collect();
+        let mut items: Vec<String> = requests
+            .iter()
+            .map(|r| {
+                format!(
+                    "Approve: {} asked to {}",
+                    r["requested_by"].as_str().unwrap_or(""),
+                    r["action"].as_str().unwrap_or("")
+                )
+            })
+            .collect();
+        items.extend(requests.iter().map(|r| {
+            format!(
+                "Refuse:  {} asked to {}",
+                r["requested_by"].as_str().unwrap_or(""),
+                r["action"].as_str().unwrap_or("")
+            )
+        }));
+        items.push("Nothing now".into());
+        let choice = dialoguer::Select::new()
+            .with_prompt("What do you want to do?")
+            .items(&items)
+            .default(items.len() - 1)
+            .interact_opt()
+            .map_err(|e| anyhow!("cannot show the list: {e}"))?;
+        return match choice {
+            Some(i) if i < ids.len() => approve(ctx, Some(&ids[i].clone()), false),
+            Some(i) if i < 2 * ids.len() => approve(ctx, Some(&ids[i - ids.len()].clone()), true),
+            _ => Ok(0),
+        };
     };
     let mut found = None;
     for scope in &scopes {
@@ -1036,6 +1075,44 @@ pub fn approve(ctx: &mut Ctx, id: Option<&str>, deny: bool) -> Result<i32> {
 }
 
 // ----- protected environments -----
+
+pub fn approve_with(ctx: &mut Ctx, method: crate::model::ApproveWith) -> Result<i32> {
+    use crate::model::ApproveWith;
+    use crate::presence::{self, Check};
+    let scope = ctx.scope()?;
+    ctx.ws.open(scope)?;
+    let name = presence::name();
+    if method == ApproveWith::Device {
+        presence::available().map_err(|why| anyhow!("{name}: {why}"))?;
+    }
+    // Changing how changes are confirmed is confirmed the current way.
+    super::reauthenticate(ctx, scope, "Changing how changes are confirmed")?;
+    if method == ApproveWith::Device {
+        match presence::verify(&format!("Cemí: use {name} to confirm changes")) {
+            Check::Verified => {}
+            Check::Refused => bail!("not confirmed with {name}; nothing changed"),
+            Check::Unavailable(why) => bail!("{name}: {why}"),
+        }
+    }
+    let v = ctx.ws.open(scope)?;
+    let root = v.root_id();
+    v.entity_mut(&root).approve_with = Some(method);
+    v.save()?;
+    ctx.audit_detail(
+        scope,
+        "approve.with",
+        None,
+        None,
+        Some(format!("{method:?}").to_lowercase()),
+    );
+    ui::ok(match method {
+        ApproveWith::Device => format!(
+            "Approvals, protected environments and `reveal` now ask for {name}. If it is not available, Cemí asks for the password"
+        ),
+        ApproveWith::Password => "Approvals and protected environments ask for the password".into(),
+    });
+    Ok(0)
+}
 
 pub fn protect(ctx: &mut Ctx, name: &str, on: bool) -> Result<i32> {
     let scope = ctx.scope()?;

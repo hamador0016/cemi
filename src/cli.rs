@@ -406,11 +406,25 @@ pub enum Cmd {
     },
     /// Changes that an AI client asked for in protected environments
     Approve {
-        /// Request id (without it: list the requests)
+        /// Request id (without it: list the requests, and in a terminal pick one)
         id: Option<String>,
         /// Refuse the request
         #[arg(long, requires = "id")]
         deny: bool,
+    },
+    /// How a person confirms approvals and protected changes: device (Windows Hello or Touch ID) or password
+    ApproveWith {
+        #[arg(value_enum)]
+        method: crate::model::ApproveWith,
+    },
+    /// An icon in the notification area that tells you when an AI asks for approval (Windows)
+    Tray {
+        /// Also watch the local vault of these project folders (the current one is always watched)
+        #[arg(long = "project", value_name = "FOLDER")]
+        projects: Vec<std::path::PathBuf>,
+        /// Stay attached to this terminal (used when the icon starts itself)
+        #[arg(long, hide = true)]
+        foreground: bool,
     },
 
     /// Access tokens for AI clients
