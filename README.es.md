@@ -45,8 +45,26 @@ valores.
 
 ## Instalar
 
-Desde la página de versiones, con el script de instalación (pone `cemi` en `~/.cargo/bin` y
-comprueba el SHA-256 de lo que baja):
+Cemí es un solo ejecutable. Hay tres formas de tenerlo.
+
+**Descargarlo y comprobarlo.** En la [página de versiones](https://github.com/hamador0016/cemi/releases/latest),
+baja el archivo para tu sistema y su `.sha256`. Comprueba que el archivo es el publicado y que
+GitHub Actions lo compiló desde este repositorio:
+
+```bash
+sha256sum -c cemi-x86_64-unknown-linux-gnu.tar.xz.sha256     # macOS: shasum -a 256 -c …
+gh attestation verify cemi-x86_64-unknown-linux-gnu.tar.xz -R hamador0016/cemi
+```
+
+```powershell
+(Get-FileHash cemi-x86_64-pc-windows-msvc.zip -Algorithm SHA256).Hash   # compáralo con el .sha256
+gh attestation verify cemi-x86_64-pc-windows-msvc.zip -R hamador0016/cemi
+```
+
+Después extrae `cemi` (`cemi.exe` en Windows) en una carpeta de tu `PATH`.
+
+**Con el script de instalación.** Baja el mismo archivo, comprueba su SHA-256 y pone `cemi` en
+`~/.cargo/bin`. El script es un archivo más de cada versión, así que puedes leerlo antes:
 
 ```bash
 curl --proto '=https' --tlsv1.2 -LsSf https://github.com/hamador0016/cemi/releases/latest/download/cemi-installer.sh | sh
@@ -56,15 +74,15 @@ curl --proto '=https' --tlsv1.2 -LsSf https://github.com/hamador0016/cemi/releas
 powershell -ExecutionPolicy Bypass -c "irm https://github.com/hamador0016/cemi/releases/latest/download/cemi-installer.ps1 | iex"
 ```
 
-O con Rust:
+**Con Rust**, desde el código en [crates.io](https://crates.io/crates/cemi):
 
 ```bash
 cargo install cemi --locked
 ```
 
-Cada archivo de una versión tiene una atestación de origen de GitHub Actions:
-`gh attestation verify <archivo> -R hamador0016/cemi` comprueba que se compiló desde este
-repositorio. `cemi self update` instala la versión más nueva cuando cemi vino del script.
+`cemi self update` instala la versión más nueva cuando cemi vino del script. Cada versión se
+instala de las dos formas y se usa en máquinas Windows, macOS y Linux recién creadas en cuanto se
+publica (el workflow Install), y otra vez cada semana.
 
 Autocompletado con Tab, incluidos los nombres de tus registros y ambientes mientras la bóveda
 está abierta: `cemi completion powershell` (o `bash`, `zsh`, `fish`, `elvish`) imprime la línea
@@ -119,6 +137,37 @@ Crea los registros con sus campos, notas sobre cómo rotar cada llave y qué hac
 y las variables en `cemi.toml`; después lista los `cemi set` para los valores. `cemi preset ls`
 los muestra todos (Supabase, Next.js + Supabase, Stripe, Resend, Postgres); `cemi preset add`
 agrega uno a un proyecto que ya existe.
+
+## Tu IA en 60 segundos
+
+De un proyecto con un `.env` a un agente de IA que lo corre con claves que nunca ve:
+
+```bash
+cemi init --global                              # una vez por computadora: eliges una contraseña
+cemi import --discover .                        # los valores van a la bóveda; cemi.toml queda con referencias
+cemi token create agent --allow read --allow run --env dev --expires 7d
+cemi mcp setup claude-code --token-name agent   # otros clientes: mira "Con un asistente de IA"
+```
+
+Después indica qué comandos puede correr el agente, en `cemi.toml`:
+
+```toml
+[ai.commands]
+test = { cmd = ["npm", "test"], envs = ["dev"] }
+```
+
+Pídele que corra las pruebas: usa la herramienta `run` de Cemí, las pruebas reciben las claves y
+cualquier clave en la salida vuelve como `[hidden:STRIPE_KEY]`.
+
+El **skill de Cemí** le enseña al agente las reglas (nunca pedir un valor, correr todo por Cemí,
+cómo rotar una clave filtrada). En Claude Code:
+
+```text
+/plugin install cemi --marketplace hamador0016/cemi
+```
+
+Para otros agentes que leen skills, copia [`plugins/cemi/skills/cemi`](plugins/cemi/skills/cemi/SKILL.md)
+a su carpeta de skills.
 
 ## ¿Ya tienes archivos .env?
 

@@ -1,0 +1,105 @@
+name: Install
+
+# Installs a published release on fresh machines, the two ways the README describes, and
+# uses it: a downloaded archive checked against its SHA-256 and its build attestation, and
+# the install script. Runs for every release, every week, and by hand.
+on:
+  release:
+    types: [published]
+  schedule:
+    - cron: "17 6 * * 2"
+  workflow_dispatch:
+    inputs:
+      tag:
+        description: "Release tag (default: the latest release)"
+        required: false
+
+permissions:
+  contents: read
+
+jobs:
+  install:
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - os: ubuntu-latest
+            archive: cemi-x86_64-unknown-linux-gnu.tar.xz
+          - os: macos-latest
+            archive: cemi-aarch64-apple-darwin.tar.xz
+          - os: windows-latest
+            archive: cemi-x86_64-pc-windows-msvc.zip
+    runs-on: ${{ matrix.os }}
+    defaults:
+      run:
+        shell: bash
+    env:
+      GH_TOKEN: ${{ github.token }}
+      REPO: ${{ github.repository }}
+      ARCHIVE: ${{ matrix.archive }}
+    steps:
+      - name: Pick the release
+        env:
+          EVENT_TAG: ${{ github.event.release.tag_name }}
+          INPUT_TAG: ${{ inputs.tag }}
+        run: |
+          tag="${EVENT_TAG:-$INPUT_TAG}"
+          if [ -z "$tag" ]; then tag=$(gh release view -R "$REPO" --json tagName -q .tagName); fi
+          echo "TAG=$tag" >> "$GITHUB_ENV"
+          echo "Release: $tag"
+
+      - name: Download, check the checksum and the attestation
+        run: |
+          mkdir dl && cd dl
+          gh release download "$TAG" -R "$REPO" -p "$ARCHIVE" -p "$ARCHIVE.sha256"
+          expected=$(cut -d' ' -f1 "$ARCHIVE.sha256")
+          actual=$( (sha256sum "$ARCHIVE" 2>/dev/null || shasum -a 256 "$ARCHIVE") | cut -d' ' -f1)
+          echo "expected $expected"
+          echo "actual   $actual"
+          [ "$expected" = "$actual" ]
+          gh attestation verify "$ARCHIVE" -R "$REPO"
+          case "$ARCHIVE" in
+            *.zip) 7z x -y "$ARCHIVE" > /dev/null ;;
+            *) tar -xf "$ARCHIVE" ;;
+          esac
+          bin=$(find . -type f \( -name cemi -o -name cemi.exe \) | head -1)
+          "$bin" --version | grep -F "${TAG#v}"
+
+      - name: Install with the install script
+        if: runner.os != 'Windows'
+        run: |
+          curl --proto '=https' --tlsv1.2 -LsSf "https://github.com/$REPO/releases/download/$TAG/cemi-installer.sh" | sh
+          echo "$HOME/.cargo/bin" >> "$GITHUB_PATH"
+
+      - name: Install with the install script (PowerShell)
+        if: runner.os == 'Windows'
+        shell: pwsh
+        run: |
+          irm "https://github.com/$env:REPO/releases/download/$env:TAG/cemi-installer.ps1" | iex
+          Add-Content $env:GITHUB_PATH "$HOME\.cargo\bin"
+
+      - name: Use it like a new user
+        env:
+          CEMI_HOME: ${{ runner.temp }}/cemi-vault
+          # The runners have no system keyring: every command reads the password instead.
+          CEMI_NO_SESSION: "1"
+        run: |
+          set -euo pipefail
+          cemi --version | grep -F "${TAG#v}"
+          pw=install-test-pass-4821
+          mkdir -p "$RUNNER_TEMP/app" && cd "$RUNNER_TEMP/app"
+          git init -q
+          printf '%s\n%s\n' "$pw" "$pw" | cemi --password-stdin init --global > /dev/null
+          echo "$pw" | cemi --password-stdin init > /dev/null
+          echo "$pw" | cemi --password-stdin add db
+          echo "$pw" | cemi --password-stdin field add db password --secret
+          printf '%s\n%s\n' "$pw" "value-for-the-test" | cemi --password-stdin set db#password -e dev --stdin
+          echo "$pw" | cemi --password-stdin var add DB_PASSWORD db#password
+          out=$(echo "$pw" | cemi --password-stdin run -e dev --redact -- sh -c 'echo "got $DB_PASSWORD (${#DB_PASSWORD} chars)"')
+          echo "$out"
+          echo "$out" | grep -F "got [hidden:DB_PASSWORD] (18 chars)"
+          printf 'API_KEY=value-from-dotenv\n' > .env
+          echo "$pw" | cemi --password-stdin import .env -e dev
+          echo "$pw" | cemi --password-stdin status
+          grep -q DB_PASSWORD cemi.toml
+          ! grep -q value-for-the-test cemi.toml

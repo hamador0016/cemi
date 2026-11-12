@@ -1,0 +1,15 @@
+{
+  "name": "cemi",
+  "description": "Cemí: secrets with memory that your AI can use without seeing",
+  "owner": {
+    "name": "hamador0016",
+    "url": "https://github.com/hamador0016"
+  },
+  "plugins": [
+    {
+      "name": "cemi",
+      "source": "./plugins/cemi",
+      "description": "Teaches the agent to use Cemí's MCP tools and never handle secret values"
+    }
+  ]
+}

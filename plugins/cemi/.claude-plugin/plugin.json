@@ -1,0 +1,13 @@
+{
+  "name": "cemi",
+  "description": "Use API keys and passwords from Cemí's encrypted vault without seeing their values",
+  "version": "0.5.0",
+  "author": {
+    "name": "hamador0016",
+    "url": "https://github.com/hamador0016"
+  },
+  "homepage": "https://github.com/hamador0016/cemi",
+  "repository": "https://github.com/hamador0016/cemi",
+  "license": "Apache-2.0",
+  "keywords": ["secrets", "env", "mcp", "security"]
+}

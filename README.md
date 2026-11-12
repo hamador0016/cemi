@@ -44,10 +44,26 @@ ever receiving the values.
 
 ## Install
 
-Cemí is a single executable.
+Cemí is a single executable. There are three ways to get it.
 
-From the releases page, with the install script (it puts `cemi` in `~/.cargo/bin` and checks
-the download's SHA-256):
+**Download it and check it.** From the [releases page](https://github.com/hamador0016/cemi/releases/latest),
+download the archive for your system and its `.sha256` file. Check that the archive is the one
+published, and that GitHub Actions built it from this repository:
+
+```bash
+sha256sum -c cemi-x86_64-unknown-linux-gnu.tar.xz.sha256     # macOS: shasum -a 256 -c …
+gh attestation verify cemi-x86_64-unknown-linux-gnu.tar.xz -R hamador0016/cemi
+```
+
+```powershell
+(Get-FileHash cemi-x86_64-pc-windows-msvc.zip -Algorithm SHA256).Hash   # compare with the .sha256 file
+gh attestation verify cemi-x86_64-pc-windows-msvc.zip -R hamador0016/cemi
+```
+
+Then extract `cemi` (`cemi.exe` on Windows) to a folder in your `PATH`.
+
+**With the install script.** It downloads the same archive, checks its SHA-256 and puts `cemi`
+in `~/.cargo/bin`. The script is a file of each release, so you can read it first:
 
 ```bash
 curl --proto '=https' --tlsv1.2 -LsSf https://github.com/hamador0016/cemi/releases/latest/download/cemi-installer.sh | sh
@@ -57,15 +73,15 @@ curl --proto '=https' --tlsv1.2 -LsSf https://github.com/hamador0016/cemi/releas
 powershell -ExecutionPolicy Bypass -c "irm https://github.com/hamador0016/cemi/releases/latest/download/cemi-installer.ps1 | iex"
 ```
 
-Or with Rust:
+**With Rust**, from the source on [crates.io](https://crates.io/crates/cemi):
 
 ```bash
 cargo install cemi --locked
 ```
 
-Every file of a release has a build provenance attestation from GitHub Actions:
-`gh attestation verify <file> -R hamador0016/cemi` checks that it was built from this repository.
-`cemi self update` installs the newest release when cemi came from the install script.
+`cemi self update` installs the newest release when cemi came from the install script. Every
+release is installed both ways and used on fresh Windows, macOS and Linux machines as soon as it
+is published (the Install workflow), and again every week.
 
 Tab completion, including your record and environment names while the vault is unlocked:
 `cemi completion powershell` (or `bash`, `zsh`, `fish`, `elvish`) prints the line for your
@@ -120,6 +136,37 @@ It creates the records with their fields, notes on how to rotate each key and wh
 it leaks, and the variables in `cemi.toml`; then it lists the `cemi set` commands for the
 values. `cemi preset ls` shows them all (Supabase, Next.js + Supabase, Stripe, Resend,
 Postgres); `cemi preset add` adds one to a project that already exists.
+
+## Your AI in 60 seconds
+
+From a project with a `.env` file to an AI agent that runs it with keys it never sees:
+
+```bash
+cemi init --global                              # once per computer: choose a password
+cemi import --discover .                        # the values go to the vault; cemi.toml gets references
+cemi token create agent --allow read --allow run --env dev --expires 7d
+cemi mcp setup claude-code --token-name agent   # other clients: see "With an AI assistant"
+```
+
+Then say which commands the agent may run, in `cemi.toml`:
+
+```toml
+[ai.commands]
+test = { cmd = ["npm", "test"], envs = ["dev"] }
+```
+
+Ask it to run the tests: it calls Cemí's `run` tool, the tests get the keys, and any key in the
+output comes back as `[hidden:STRIPE_KEY]`.
+
+The **Cemí skill** teaches the agent the rules (never ask for a value, run through Cemí, how to
+rotate a leaked key). In Claude Code:
+
+```text
+/plugin install cemi --marketplace hamador0016/cemi
+```
+
+For other agents that read skills, copy [`plugins/cemi/skills/cemi`](plugins/cemi/skills/cemi/SKILL.md)
+to their skills folder.
 
 ## Already have .env files?
 
