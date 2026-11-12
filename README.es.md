@@ -149,6 +149,23 @@ nombre del archivo: `.env` vale para todos, y `.env.<ambiente>` y `.env.local` l
 sobrescriben, igual que los leen la mayoría de las herramientas. Después, `cemi run -e dev --
 <tu comando>` en cada carpeta, y los `.env` se pueden borrar.
 
+Desde otro gestor de secretos, con su propio programa de línea de comandos y tu sesión en él
+(Cemí nunca pide su token de API):
+
+```bash
+doppler login && cemi import --from doppler --project shop --config dev -e dev
+op signin && cemi import --from 1password --vault Work
+```
+
+Los dos muestran lo que encontraron (nombres, nunca valores) y preguntan antes; `--yes` se salta
+la pregunta. Las variables de Doppler se importan como un `.env`: un registro por variable,
+agregado a `cemi.toml`, con `--into`, `-e` y `--plain`. Cada elemento de 1Password pasa a ser un
+registro en la entidad con el nombre de la bóveda (o `--into`), y sus campos pasan a ser campos:
+los ocultos, las contraseñas, los códigos de un solo uso y las notas son secretos; los de texto,
+correo, teléfono, fecha y URL no; el sitio web queda en un campo `website`. Los adjuntos y los
+documentos no se importan, y la vista previa dice cuántos se saltaron. Los valores se leen de la
+salida del programa, nunca se pasan como argumentos.
+
 ## Tipos para tus variables
 
 ```bash

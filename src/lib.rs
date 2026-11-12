@@ -11,6 +11,7 @@ pub mod crypto;
 pub mod discover;
 pub mod dotenv;
 pub mod errors;
+pub mod import_sources;
 pub mod mcp;
 pub mod mcp_clients;
 pub mod model;

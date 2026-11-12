@@ -4,9 +4,10 @@ use anyhow::{Context, Result, anyhow, bail};
 use zeroize::Zeroizing;
 
 use super::Ctx;
-use crate::cli::VarCmd;
+use crate::cli::{ImportSource, VarCmd};
 use crate::discover::{self, FoundProject, GitState};
 use crate::dotenv::{self, check_var_name};
+use crate::import_sources;
 use crate::model::{Field, FieldKind, SHARED, Value, memory_keys as mk, validate_name};
 use crate::project::{self, Project};
 use crate::refs::VaultSel;
@@ -229,40 +230,75 @@ pub fn import(
     }
     let plain = plain_list(plain);
     let project = if no_link { None } else { ctx.project()? };
+    let (sel, path) = import_target(ctx, into, project.as_ref())?;
+    let source = file.display().to_string();
+    store_and_link(ctx, sel, &path, env, &pairs, &plain, &source, project)?;
+    ui::warn(format!(
+        "{} still has the plain values. Delete it once `cemi run` works for you.",
+        file.display()
+    ));
+    Ok(0)
+}
 
-    // Default destination: the project's base entity.
-    let (sel, path) = match (into, &project) {
-        (Some(i), _) => ctx.entity_path(Some(i))?,
+/// Where imported variables go: `--into`, else the project's base entity,
+/// else the root of the vault.
+fn import_target(
+    ctx: &Ctx,
+    into: Option<&str>,
+    project: Option<&Project>,
+) -> Result<(VaultSel, Vec<String>)> {
+    match (into, project) {
+        (Some(i), _) => ctx.entity_path(Some(i)),
         (None, Some(p)) => {
             let (s, e) = p.base()?;
-            (if ctx.global { VaultSel::Global } else { s }, e)
+            Ok((if ctx.global { VaultSel::Global } else { s }, e))
         }
-        (None, None) => ctx.entity_path(None)?,
-    };
-    let scope = ctx.ws.scope_for(sel)?;
-    let v = ctx.ws.open(scope)?;
-    let entity = v.ensure_entity(&path)?;
+        (None, None) => ctx.entity_path(None),
+    }
+}
+
+/// Fails unless `env` is an environment of `entity`.
+fn require_env(v: &crate::vault::Vault, entity: &str, env: Option<&str>) -> Result<()> {
     if let Some(e) = env
-        && !v.effective_envs(&entity).iter().any(|x| x == e)
+        && !v.effective_envs(entity).iter().any(|x| x == e)
     {
         return Err(crate::errors::not_found(format!(
             "environment {e:?} does not exist there; add it with `cemi env add {e}`"
         )));
     }
-    let source = file.display().to_string();
-    let n = store_vars(v, &entity, env, &pairs, &plain, &source)?;
+    Ok(())
+}
+
+/// Stores variables as records of the entity `path`, then adds them to the
+/// project's cemi.toml (when there is one).
+#[allow(clippy::too_many_arguments)]
+fn store_and_link(
+    ctx: &mut Ctx,
+    sel: VaultSel,
+    path: &[String],
+    env: Option<&str>,
+    pairs: &[(String, Zeroizing<String>)],
+    plain: &[String],
+    source: &str,
+    project: Option<Project>,
+) -> Result<()> {
+    let scope = ctx.ws.scope_for(sel)?;
+    let v = ctx.ws.open(scope)?;
+    let entity = v.ensure_entity(path)?;
+    require_env(v, &entity, env)?;
+    let n = store_vars(v, &entity, env, pairs, plain, source)?;
     v.save()?;
     ctx.audit_detail(
         scope,
         "import",
-        Some(display_path(&path)),
+        Some(display_path(path)),
         env,
         Some(format!("{} variables", pairs.len())),
     );
     ui::ok(format!(
         "Imported {} variables into {} ({})",
         pairs.len(),
-        display_path(&path),
+        display_path(path),
         n.summary()
     ));
 
@@ -271,7 +307,7 @@ pub fn import(
             .iter()
             .map(|(k, _)| (k.clone(), format!("{k}#value")))
             .collect();
-        let linked = link_vars(ctx, &p.path, scope, &path, &entries)?;
+        let linked = link_vars(ctx, &p.path, scope, path, &entries)?;
         ui::ok(format!(
             "Added {} variables to {}",
             linked.added.len(),
@@ -284,10 +320,236 @@ pub fn import(
             ));
         }
     }
-    ui::warn(format!(
-        "{} still has the plain values. Delete it once `cemi run` works for you.",
-        file.display()
+    Ok(())
+}
+
+pub struct FromOptions<'a> {
+    pub project: Option<&'a str>,
+    pub config: Option<&'a str>,
+    pub vault: Option<&'a str>,
+    pub into: Option<&'a str>,
+    pub env: Option<&'a str>,
+    pub plain: &'a str,
+    pub no_link: bool,
+    pub yes: bool,
+}
+
+/// `cemi import --from doppler|1password`: shows what the other secret
+/// manager has (names only), asks, then imports.
+pub fn import_from(ctx: &mut Ctx, source: ImportSource, o: FromOptions) -> Result<i32> {
+    match source {
+        ImportSource::Doppler => {
+            if o.vault.is_some() {
+                bail!("--vault is for 1Password; Doppler uses --project and --config");
+            }
+            import_doppler(ctx, &o)
+        }
+        ImportSource::OnePassword => {
+            if o.project.is_some() || o.config.is_some() {
+                bail!("--project and --config are for Doppler; 1Password uses --vault");
+            }
+            import_1password(ctx, &o)
+        }
+    }
+}
+
+fn env_label(env: Option<&str>) -> String {
+    match env {
+        Some(e) => format!("environment {e}"),
+        None => "all environments; choose one with -e".into(),
+    }
+}
+
+/// Asks before importing; without a terminal (and without --yes) the answer is no.
+fn confirm_import(yes: bool) -> bool {
+    if yes || ui::confirm("Import them?") {
+        return true;
+    }
+    crate::outln!("Nothing imported. Run it again with --yes to import.");
+    false
+}
+
+fn import_doppler(ctx: &mut Ctx, o: &FromOptions) -> Result<i32> {
+    let pairs = import_sources::doppler(o.project, o.config)?;
+    let mut label = String::from("Doppler");
+    if let Some(p) = o.project {
+        label.push_str(&format!(" project {p}"));
+    }
+    if let Some(c) = o.config {
+        label.push_str(&format!(" config {c}"));
+    }
+    if pairs.is_empty() {
+        bail!("{label} has no variables");
+    }
+    let plain = plain_list(o.plain);
+    let project = if o.no_link { None } else { ctx.project()? };
+    let (sel, path) = import_target(ctx, o.into, project.as_ref())?;
+    let scope = ctx.ws.scope_for(sel)?;
+    crate::outln!(
+        "{label}: {} variable{} → {scope}:{} ({})",
+        pairs.len(),
+        plural(pairs.len()),
+        path.join("/"),
+        env_label(o.env)
+    );
+    for (k, _) in &pairs {
+        let kind = if plain.contains(k) { "plain" } else { "secret" };
+        crate::outln!("  {k}  ({kind})");
+    }
+    if let Some(p) = &project {
+        crate::outln!("They are added to {}.", p.path.display());
+    }
+    let names: Vec<&str> = pairs.iter().map(|(k, _)| k.as_str()).collect();
+    let mut report = serde_json::json!({
+        "source": "doppler",
+        "vault": scope.to_string(),
+        "entity": path.join("/"),
+        "variables": names,
+        "imported": false,
+    });
+    ui::data(report.clone());
+    if !confirm_import(o.yes) {
+        return Ok(0);
+    }
+    store_and_link(ctx, sel, &path, o.env, &pairs, &plain, &label, project)?;
+    report["imported"] = serde_json::json!(true);
+    ui::data(report);
+    Ok(0)
+}
+
+fn import_1password(ctx: &mut Ctx, o: &FromOptions) -> Result<i32> {
+    let vault = o
+        .vault
+        .ok_or_else(|| anyhow!("give the 1Password vault to import: --vault <name>"))?;
+    let into = match o.into {
+        Some(i) => i.to_string(),
+        None => {
+            let name: String = vault
+                .chars()
+                .map(|c| {
+                    if c == '/' || c == '#' || c.is_control() {
+                        '-'
+                    } else {
+                        c
+                    }
+                })
+                .collect();
+            validate_name(name.trim(), "entity")?;
+            name.trim().to_string()
+        }
+    };
+    let (sel, path) = ctx.entity_path(Some(&into))?;
+    let scope = ctx.ws.scope_for(sel)?;
+    let found = import_sources::onepassword(vault)?;
+    let label = format!("1Password vault {vault}");
+    crate::outln!(
+        "{label}: {} item{} → {scope}:{} ({})",
+        found.items.len(),
+        plural(found.items.len()),
+        path.join("/"),
+        env_label(o.env)
+    );
+    for item in &found.items {
+        let fields: Vec<String> = item
+            .fields
+            .iter()
+            .map(|f| {
+                if f.secret {
+                    format!("{} (secret)", f.name)
+                } else {
+                    f.name.clone()
+                }
+            })
+            .collect();
+        crate::outln!("  {}: {}", item.name, fields.join(", "));
+    }
+    if found.files_skipped > 0 {
+        crate::outln!(
+            "Skipped {} file attachment{}: Cemí does not import files from 1Password.",
+            found.files_skipped,
+            plural(found.files_skipped)
+        );
+    }
+    if found.empty_skipped > 0 {
+        crate::outln!(
+            "Skipped {} item{} with no value to import.",
+            found.empty_skipped,
+            plural(found.empty_skipped)
+        );
+    }
+    let mut report = serde_json::json!({
+        "source": "1password",
+        "vault": scope.to_string(),
+        "entity": path.join("/"),
+        "items": found.items.iter().map(|i| serde_json::json!({
+            "name": i.name,
+            "fields": i.fields.iter().map(|f| serde_json::json!({
+                "name": f.name, "secret": f.secret, "kind": f.kind.to_string(),
+            })).collect::<Vec<_>>(),
+        })).collect::<Vec<_>>(),
+        "files_skipped": found.files_skipped,
+        "imported": false,
+    });
+    ui::data(report.clone());
+    if found.items.is_empty() || !confirm_import(o.yes) {
+        return Ok(0);
+    }
+
+    let v = ctx.ws.open(scope)?;
+    let entity = v.ensure_entity(&path)?;
+    require_env(v, &entity, o.env)?;
+    let slot_key = o.env.unwrap_or(SHARED).to_string();
+    let note = format!("import {label}");
+    let mut n = Stored::default();
+    for item in &found.items {
+        let (id, new) = match v.find_record_in(&entity, &item.name) {
+            Some(r) => (r.id.clone(), false),
+            None => (v.add_record(&entity, &item.name)?, true),
+        };
+        let rec = v.record_mut(&id);
+        let mut changed = false;
+        for f in &item.fields {
+            if rec.field(&f.name).is_none() {
+                rec.fields.push(Field::new(&f.name, f.kind, f.secret));
+            }
+            let slot = rec
+                .field_mut(&f.name)
+                .expect("ensured")
+                .values
+                .entry(slot_key.clone())
+                .or_default();
+            let same = matches!(
+                slot.current(),
+                Some(Value::Text { text }) if text.expose() == f.value.as_str()
+            );
+            if !same {
+                slot.push(Value::text(f.value.as_str()), "cli", Some(note.clone()));
+                changed = true;
+            }
+        }
+        match (new, changed) {
+            (true, _) => n.created += 1,
+            (false, true) => n.updated += 1,
+            (false, false) => n.unchanged += 1,
+        }
+    }
+    v.save()?;
+    ctx.audit_detail(
+        scope,
+        "import",
+        Some(display_path(&path)),
+        o.env,
+        Some(format!("{} items from {label}", found.items.len())),
+    );
+    ui::ok(format!(
+        "Imported {} item{} into {} ({})",
+        found.items.len(),
+        plural(found.items.len()),
+        display_path(&path),
+        n.summary()
     ));
+    report["imported"] = serde_json::json!(true);
+    ui::data(report);
     Ok(0)
 }
 

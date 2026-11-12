@@ -147,6 +147,23 @@ it. The environment comes from the file name: `.env` is for every environment, a
 `.env.<env>` and `.env.local` override it, the way most loaders read them. Then
 `cemi run -e dev -- <your command>` in each folder, and the `.env` files can go.
 
+From another secret manager, through its own command-line program and your session in it
+(Cemí never asks for its API token):
+
+```bash
+doppler login && cemi import --from doppler --project shop --config dev -e dev
+op signin && cemi import --from 1password --vault Work
+```
+
+Both show what they found (names, never values) and ask first; `--yes` skips the question.
+Doppler's variables are imported like a `.env` file: one record per variable, added to
+`cemi.toml`, with `--into`, `-e` and `--plain`. Each 1Password item becomes a record in the
+entity named after the vault (or `--into`), and its fields become fields: concealed ones,
+passwords, one-time passwords and notes are secret; text, email, phone, date and URL fields are
+not; the website becomes a `website` field. File attachments and documents are not imported,
+and the preview says how many were skipped. Values are read from the program's output, never
+passed as arguments.
+
 ## Types for your variables
 
 ```bash

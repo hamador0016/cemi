@@ -11,6 +11,10 @@ change commands. Vaults made by any earlier version keep opening (`tests/compat.
   Copilot), `windsurf`, `devin`, `zed`, `codex` and `gemini`: the project's file with a project
   vault, the user's file with `--global`. Other servers and settings in the file are kept; a
   file with comments is left as it was and the snippet is printed. `--print` only prints it.
+- `cemi import --from doppler` (`--project`, `--config`) and `cemi import --from 1password`
+  (`--vault`), through the `doppler` and `op` programs: a preview with names only, then a
+  question (`--yes` skips it). 1Password items become records and their fields become fields;
+  attachments are skipped and counted.
 
 ## 0.5.0
 
