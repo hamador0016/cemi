@@ -12,6 +12,8 @@ mod structure;
 mod values;
 mod vault_cmds;
 
+pub use values::{clipboard_helper, copy_with_helper};
+
 use anyhow::Result;
 
 use crate::audit::{self, Event};

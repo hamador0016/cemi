@@ -218,6 +218,15 @@ impl Workspace {
             })
     }
 
+    /// Uses a vault the caller already opened with its key, so `open` never
+    /// asks for a password for it (programs without a terminal).
+    pub fn adopt(&mut self, vault: Vault) {
+        match vault.scope() {
+            Scope::Global => self.global = Some(vault),
+            Scope::Local => self.local = Some(vault),
+        }
+    }
+
     pub fn open_sel(&mut self, sel: VaultSel) -> Result<&mut Vault> {
         let scope = self.scope_for(sel)?;
         self.open(scope)

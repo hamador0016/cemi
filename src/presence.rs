@@ -51,10 +51,17 @@ pub fn available() -> Result<(), String> {
 
 /// Asks the person to confirm `reason` (shown in the system dialog).
 pub fn verify(reason: &str) -> Check {
+    verify_for_window(reason, None)
+}
+
+/// Like [`verify`], with the system dialog tied to a window of the calling
+/// program (on Windows, its `HWND`; ignored elsewhere). Without one, the
+/// dialog is tied to the console window, if there is one.
+pub fn verify_for_window(reason: &str, window: Option<isize>) -> Check {
     if let Some(answer) = test_answer() {
         return answer;
     }
-    platform::verify(reason)
+    platform::verify(reason, window)
 }
 
 #[cfg(windows)]
@@ -63,6 +70,7 @@ mod platform {
     use windows::Security::Credentials::UI::{
         UserConsentVerificationResult, UserConsentVerifier, UserConsentVerifierAvailability,
     };
+    use windows::Win32::Foundation::HWND;
     use windows::Win32::System::Console::GetConsoleWindow;
     use windows::Win32::System::WinRT::IUserConsentVerifierInterop;
     use windows::core::{HSTRING, factory};
@@ -91,13 +99,17 @@ mod platform {
         }
     }
 
-    pub fn verify(reason: &str) -> Check {
+    pub fn verify(reason: &str, window: Option<isize>) -> Check {
         if let Err(why) = available() {
             return Check::Unavailable(why);
         }
         let message = HSTRING::from(reason);
-        // Tied to the console window, so the dialog comes up in front of it.
-        let hwnd = unsafe { GetConsoleWindow() };
+        // Tied to the caller's window, or the console window, so the dialog
+        // comes up in front of it.
+        let hwnd = match window {
+            Some(w) => HWND(w as *mut core::ffi::c_void),
+            None => unsafe { GetConsoleWindow() },
+        };
         let op: windows::core::Result<IAsyncOperation<UserConsentVerificationResult>> =
             if hwnd.is_invalid() {
                 UserConsentVerifier::RequestVerificationAsync(&message)
@@ -133,7 +145,7 @@ mod platform {
             .map_err(|e| format!("Touch ID is not available: {}", e.localizedDescription()))
     }
 
-    pub fn verify(reason: &str) -> Check {
+    pub fn verify(reason: &str, _window: Option<isize>) -> Check {
         if let Err(why) = available() {
             return Check::Unavailable(why);
         }
@@ -166,7 +178,7 @@ mod platform {
         Err("this system has no device check that Cemí can use; approvals use the password".into())
     }
 
-    pub fn verify(_reason: &str) -> Check {
+    pub fn verify(_reason: &str, _window: Option<isize>) -> Check {
         Check::Unavailable(available().unwrap_err())
     }
 }

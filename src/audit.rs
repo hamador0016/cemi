@@ -23,7 +23,7 @@ pub const FILE: &str = "audit.log";
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct Entry {
     pub at: Timestamp,
-    /// "cli", or "mcp:<token name>".
+    /// "cli", "desktop" (the desktop app), or "mcp:<token name>".
     pub actor: String,
     pub action: String,
     #[serde(default, skip_serializing_if = "Option::is_none")]

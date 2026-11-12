@@ -131,6 +131,18 @@ pub fn is_open(vault_id: &str) -> bool {
     read_session(vault_id).is_some_and(|s| s.expires > Timestamp::now())
 }
 
+/// When the open session of a vault ends, without extending it.
+pub fn expires(vault_id: &str) -> Option<Timestamp> {
+    read_session(vault_id)
+        .map(|s| s.expires)
+        .filter(|e| *e > Timestamp::now())
+}
+
+/// Whether sessions are kept at all (`CEMI_NO_SESSION` turns them off).
+pub fn enabled() -> bool {
+    !matches!(backend(), Backend::Disabled)
+}
+
 fn token_entry(name: &str) -> String {
     format!("token:{name}")
 }

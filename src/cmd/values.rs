@@ -216,24 +216,7 @@ pub fn copy(ctx: &mut Ctx, reference: Option<&str>, env: Option<&str>) -> Result
     r.require_field()?;
     let (scope, val) = resolve_for_human(ctx, &r, env)?;
     let text = val.text()?;
-    let exe = std::env::current_exe().context("cannot find the cemi executable")?;
-    let mut cmd = std::process::Command::new(exe);
-    cmd.args(["__clipboard", "30"])
-        .stdin(std::process::Stdio::piped())
-        .stdout(std::process::Stdio::null())
-        .stderr(std::process::Stdio::null());
-    #[cfg(windows)]
-    {
-        use std::os::windows::process::CommandExt;
-        const CREATE_NO_WINDOW: u32 = 0x0800_0000;
-        const CREATE_NEW_PROCESS_GROUP: u32 = 0x0000_0200;
-        cmd.creation_flags(CREATE_NO_WINDOW | CREATE_NEW_PROCESS_GROUP);
-    }
-    let mut child = cmd.spawn().context("cannot start the clipboard helper")?;
-    {
-        let mut stdin = child.stdin.take().expect("piped");
-        stdin.write_all(text.as_bytes())?;
-    }
+    copy_with_helper(&text, 30)?;
     ctx.audit(scope, "value.copy", Some(r.to_string()), env);
     ui::ok(format!(
         "Copied {r} to the clipboard. It is cleared in 30 seconds."
@@ -310,6 +293,33 @@ fn pick(ctx: &mut Ctx, env: Option<&str>) -> Result<Option<(String, Option<Strin
         .interact_opt()
         .context("the picker failed")?;
     Ok(choice.map(|i| (items[i].1.clone(), items[i].2.clone())))
+}
+
+/// Puts `text` on the clipboard through a hidden copy of this same program,
+/// started as `<program> __clipboard <seconds>` with the text on its stdin.
+/// That process clears the clipboard after `seconds`, even when this one has
+/// ended. Any program that uses this must answer that command line with
+/// [`clipboard_helper`].
+pub fn copy_with_helper(text: &str, seconds: u64) -> Result<()> {
+    let exe = std::env::current_exe().context("cannot find this program's executable")?;
+    let mut cmd = std::process::Command::new(exe);
+    cmd.args(["__clipboard", &seconds.to_string()])
+        .stdin(std::process::Stdio::piped())
+        .stdout(std::process::Stdio::null())
+        .stderr(std::process::Stdio::null());
+    #[cfg(windows)]
+    {
+        use std::os::windows::process::CommandExt;
+        const CREATE_NO_WINDOW: u32 = 0x0800_0000;
+        const CREATE_NEW_PROCESS_GROUP: u32 = 0x0000_0200;
+        cmd.creation_flags(CREATE_NO_WINDOW | CREATE_NEW_PROCESS_GROUP);
+    }
+    let mut child = cmd.spawn().context("cannot start the clipboard helper")?;
+    {
+        let mut stdin = child.stdin.take().expect("piped");
+        stdin.write_all(text.as_bytes())?;
+    }
+    Ok(())
 }
 
 /// Runs in a background process: sets the clipboard, waits, clears it if unchanged.
