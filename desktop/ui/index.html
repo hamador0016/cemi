@@ -1,0 +1,175 @@
+<!doctype html>
+<html lang="es">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Cemí</title>
+  <link rel="stylesheet" href="app.css">
+  <script src="app.js" defer></script>
+</head>
+<body>
+  <header class="titlebar" data-tauri-drag-region>
+    <img class="titlebar-logo" src="img/logo.png" alt="" data-tauri-drag-region>
+    <span class="titlebar-title" data-tauri-drag-region>Cemí</span>
+    <div class="titlebar-center" data-tauri-drag-region>
+      <label class="search" id="search-box" hidden>
+        <svg class="icon-13" viewBox="0 0 24 24" aria-hidden="true"><circle cx="11" cy="11" r="7"></circle><path d="m20 20-3.5-3.5"></path></svg>
+        <input type="search" id="search" data-i18n-placeholder="searchPlaceholder" data-i18n-label="search" autocomplete="off" spellcheck="false">
+        <kbd>Ctrl K</kbd>
+      </label>
+    </div>
+    <div class="win-controls">
+      <button type="button" class="win-btn" id="win-min" data-i18n-label="minimize">
+        <svg viewBox="0 0 10 10" aria-hidden="true"><path d="M0 5h10"></path></svg>
+      </button>
+      <button type="button" class="win-btn" id="win-max" data-i18n-label="maximize">
+        <svg class="icon-max" viewBox="0 0 10 10" aria-hidden="true"><rect x="0.5" y="0.5" width="9" height="9"></rect></svg>
+        <svg class="icon-restore" viewBox="0 0 10 10" aria-hidden="true"><rect x="0.5" y="2.5" width="7" height="7"></rect><path d="M2.5 2.5v-2h7v7h-2"></path></svg>
+      </button>
+      <button type="button" class="win-btn close" id="win-close" data-i18n-label="close">
+        <svg viewBox="0 0 10 10" aria-hidden="true"><path d="M0 0l10 10M10 0 0 10"></path></svg>
+      </button>
+    </div>
+  </header>
+
+  <!-- Closed vault -->
+  <main class="screen center-screen" id="screen-unlock" hidden>
+    <form class="card" id="unlock-form" autocomplete="off">
+      <div class="card-body">
+        <img class="card-logo" src="img/logo.png" alt="">
+        <div class="card-heading">
+          <h1 data-i18n="lockedTitle"></h1>
+          <span class="muted" id="unlock-where"></span>
+        </div>
+        <div class="notice" id="unlock-notice" hidden></div>
+        <div class="field-block">
+          <label for="unlock-password" class="strong" data-i18n="password"></label>
+          <div class="row-6">
+            <input id="unlock-password" class="text-input grow" type="password" autocomplete="current-password" spellcheck="false" required>
+            <button type="submit" class="btn" id="unlock-submit" data-i18n="open"></button>
+          </div>
+          <span class="error" id="unlock-error" role="alert"></span>
+        </div>
+        <label class="check">
+          <input type="checkbox" id="unlock-keep" checked>
+          <span id="unlock-keep-label"></span>
+        </label>
+      </div>
+      <div class="card-foot">
+        <button type="button" class="link" id="recovery-link" data-i18n="useRecovery"></button>
+        <span class="muted" id="unlock-version"></span>
+      </div>
+      <p class="card-help" id="recovery-help" hidden></p>
+    </form>
+  </main>
+
+  <!-- No global vault yet -->
+  <main class="screen center-screen" id="screen-novault" hidden>
+    <div class="card">
+      <div class="card-body">
+        <img class="card-logo" src="img/logo.png" alt="">
+        <div class="card-heading">
+          <h1 data-i18n="noVaultTitle"></h1>
+          <span class="muted center-text" data-i18n="noVaultText"></span>
+        </div>
+        <code class="command">cemi init --global</code>
+        <span class="muted center-text" data-i18n="noVaultThen"></span>
+        <button type="button" class="btn primary wide" id="novault-retry" data-i18n="lookAgain"></button>
+      </div>
+    </div>
+  </main>
+
+  <!-- The vault -->
+  <div class="screen vault-screen" id="screen-vault" hidden>
+    <div class="panes">
+      <nav class="sidebar" data-i18n-label="sections">
+        <div id="nav"></div>
+        <div class="divider"></div>
+        <span class="section-label" data-i18n="vaults"></span>
+        <div id="tree" role="tree"></div>
+        <div class="grow"></div>
+        <button type="button" class="nav-item" id="lock-button">
+          <svg class="icon-16" viewBox="0 0 24 24" aria-hidden="true"><rect x="5" y="11" width="14" height="10" rx="2"></rect><path d="M8 11V8a4 4 0 0 1 8 0v3"></path></svg>
+          <span data-i18n="closeVault"></span>
+        </button>
+      </nav>
+
+      <section class="list-pane" id="list-pane">
+        <div class="pane-head">
+          <span class="strong" id="list-title"></span>
+          <div class="segmented" role="group" id="env-switch" data-i18n-label="environment"></div>
+        </div>
+        <div class="record-list" id="record-list"></div>
+      </section>
+
+      <section class="detail-pane" id="detail-pane">
+        <div class="pane-head detail-head">
+          <span class="detail-title" id="detail-title"></span>
+          <div class="tools" id="tools"></div>
+        </div>
+        <div class="detail-body" id="detail-body"></div>
+      </section>
+    </div>
+
+    <footer class="statusbar">
+      <span class="status-open"><span class="dot dot-ok" id="status-dot"></span><span id="status-time"></span></span>
+      <span id="status-where"></span>
+      <span class="grow"></span>
+      <span id="status-version"></span>
+    </footer>
+  </div>
+
+  <!-- Dialogs -->
+  <div class="overlay" id="overlay" hidden></div>
+
+  <section class="dialog" role="dialog" aria-modal="true" id="reveal-dialog" aria-labelledby="reveal-title" hidden>
+    <div class="dialog-head">
+      <span class="grow strong" id="reveal-title" data-i18n="revealTitle"></span>
+      <button type="button" class="icon-btn" id="reveal-close" data-i18n-label="close">
+        <svg viewBox="0 0 10 10" aria-hidden="true"><path d="M0 0l10 10M10 0 0 10"></path></svg>
+      </button>
+    </div>
+    <div class="dialog-body">
+      <div class="reveal-meta">
+        <code class="reveal-ref" id="reveal-ref"></code>
+        <span class="muted" id="reveal-env"></span>
+      </div>
+      <code class="reveal-value" id="reveal-value"></code>
+      <div class="countdown">
+        <div class="bar"><div class="bar-fill" id="reveal-bar"></div></div>
+        <span id="reveal-left"></span>
+      </div>
+      <div class="confirmed">
+        <svg class="icon-14" viewBox="0 0 24 24" aria-hidden="true"><path d="M5 12l5 5 9-10"></path></svg>
+        <span id="reveal-confirmed"></span>
+      </div>
+    </div>
+    <div class="dialog-foot">
+      <button type="button" class="btn" id="reveal-hide" data-i18n="hide"></button>
+      <button type="button" class="btn primary" id="reveal-copy" data-i18n="copyClears"></button>
+    </div>
+  </section>
+
+  <form class="dialog dialog-small" role="dialog" aria-modal="true" id="password-dialog" aria-labelledby="password-title" autocomplete="off" hidden>
+    <div class="dialog-head">
+      <span class="grow strong" id="password-title" data-i18n="confirmTitle"></span>
+      <button type="button" class="icon-btn" id="password-close" data-i18n-label="close">
+        <svg viewBox="0 0 10 10" aria-hidden="true"><path d="M0 0l10 10M10 0 0 10"></path></svg>
+      </button>
+    </div>
+    <div class="dialog-body">
+      <span id="password-why"></span>
+      <span class="muted small" id="password-reason" hidden></span>
+      <label for="password-input" class="strong" data-i18n="vaultPassword"></label>
+      <input id="password-input" class="text-input" type="password" autocomplete="current-password" spellcheck="false" required>
+      <span class="error" id="password-error" role="alert"></span>
+    </div>
+    <div class="dialog-foot">
+      <button type="button" class="btn" id="password-cancel" data-i18n="cancel"></button>
+      <button type="submit" class="btn primary" id="password-submit" data-i18n="confirm"></button>
+    </div>
+  </form>
+
+  <div class="toast" id="toast" role="status" hidden></div>
+</body>
+</html>

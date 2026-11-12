@@ -1,0 +1,40 @@
+[package]
+name = "cemi-desktop"
+version = "0.6.0"
+edition = "2024"
+rust-version = "1.90"
+description = "Desktop app for Cemí: look through the vault, reveal and copy values after confirming"
+license = "Apache-2.0"
+repository = "https://github.com/hamador0016/cemi"
+publish = false
+
+# Its own workspace: the desktop app is not part of the cemi package.
+[workspace]
+
+[[bin]]
+name = "cemi-desktop"
+path = "src/main.rs"
+
+[lib]
+name = "cemi_desktop"
+path = "src/lib.rs"
+
+[build-dependencies]
+tauri-build = "2.7.4"
+
+[dependencies]
+cemi = { path = "../.." }
+anyhow = "1"
+jiff = "0.2"
+serde = { version = "1", features = ["derive"] }
+tauri = "2.12.5"
+zeroize = { version = "1.9", features = ["serde"] }
+
+[dev-dependencies]
+serde_json = "1"
+tempfile = "3"
+
+[profile.release]
+lto = true
+codegen-units = 1
+strip = true
