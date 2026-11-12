@@ -34,16 +34,21 @@ impl Ref {
         };
         let (path, field) = match rest.split_once('#') {
             Some((p, f)) => {
+                let f = f.trim();
                 if f.is_empty() {
                     bail!("empty field name in reference {text:?}");
                 }
+                check_part(f, text)?;
                 (p, Some(f.to_string()))
             }
             None => (rest, None),
         };
-        let mut parts: Vec<String> = path.split('/').map(|s| s.to_string()).collect();
-        if parts.iter().any(|p| p.trim().is_empty()) {
+        let mut parts: Vec<String> = path.split('/').map(|s| s.trim().to_string()).collect();
+        if parts.iter().any(|p| p.is_empty()) {
             bail!("invalid reference {text:?}: expected entity/record#field");
+        }
+        for p in &parts {
+            check_part(p, text)?;
         }
         let record = parts.pop().expect("split always yields one part");
         Ok(Ref {
@@ -98,15 +103,27 @@ impl fmt::Display for Ref {
     }
 }
 
+/// A name inside a reference follows the rules for names (no control
+/// characters, no vault prefix), so a reference always prints back as itself.
+fn check_part(part: &str, text: &str) -> Result<()> {
+    if crate::model::validate_name(part, "name").is_err() || part.starts_with("cemi://") {
+        bail!("invalid reference {text:?}: {part:?} is not a valid name");
+    }
+    Ok(())
+}
+
 /// Splits an entity path like `acme/shop` into names. Empty means the root.
 pub fn entity_path(text: &str) -> Result<Vec<String>> {
     let text = text.trim().trim_matches('/');
     if text.is_empty() {
         return Ok(Vec::new());
     }
-    let parts: Vec<String> = text.split('/').map(|s| s.to_string()).collect();
-    if parts.iter().any(|p| p.trim().is_empty()) {
+    let parts: Vec<String> = text.split('/').map(|s| s.trim().to_string()).collect();
+    if parts.iter().any(|p| p.is_empty()) {
         bail!("invalid entity path {text:?}");
+    }
+    for p in &parts {
+        check_part(p, text)?;
     }
     Ok(parts)
 }
@@ -137,6 +154,27 @@ mod tests {
         assert!(Ref::parse("a//b").is_err());
         assert!(Ref::parse("a#").is_err());
         assert!(Ref::parse("").is_err());
+        // Found by fuzzing: names with line breaks did not print back as themselves.
+        assert!(
+            Ref::parse(
+                "
+
+
+cemi://
+[
+
+
+[
+
+
+"
+            )
+            .is_err()
+        );
+        assert!(Ref::parse("a/b	c#d").is_err());
+        assert!(Ref::parse("a/global:b").is_err());
+        let r = Ref::parse(" acme / shop / stripe # key ").unwrap();
+        assert_eq!(r.to_string(), "acme/shop/stripe#key");
     }
 
     #[test]
