@@ -4,6 +4,11 @@
   "description": "Hover an environment variable to see what the key is for, when it expires and how to rotate it, without ever showing its value. Warns when a secret from your vault is written in a file.",
   "version": "0.1.0",
   "publisher": "cemi",
+  "icon": "icon.png",
+  "galleryBanner": {
+    "color": "#05464B",
+    "theme": "dark"
+  },
   "license": "Apache-2.0",
   "repository": {
     "type": "git",

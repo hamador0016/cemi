@@ -1,3 +1,5 @@
+<p align="center"><img src="assets/logo.webp" alt="Cemí" width="420"></p>
+
 # Cemí
 
 **Secrets with memory that your AI can use without seeing.**

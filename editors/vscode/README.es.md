@@ -1,3 +1,5 @@
+<p align="center"><img src="icon.png" alt="Cemí" width="96"></p>
+
 # Cemí para VS Code
 
 *[Read in English](README.md)*
