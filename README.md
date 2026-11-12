@@ -224,8 +224,10 @@ cemi incident shop/supabase#key -e prod      # it leaked: where it is, who used 
 ```
 
 If a destination or the check fails, the old key goes back everywhere. Built in: GitHub
-Actions secrets, Supabase API keys and function secrets, `.env` files and any command; anyone
-can add a provider as a small program. See [docs/connectors.md](docs/connectors.md).
+Actions secrets; Supabase API keys and function secrets; Cloudflare API tokens and Workers
+secrets; Resend API keys; Netlify and Vercel variables; `.env` files on this computer or on a
+server over SSH; and any command. Anyone can add a provider as a small program. See
+[docs/connectors.md](docs/connectors.md).
 
 `prod` is protected: changes there ask for your password, and an AI that asks for them through
 MCP only creates a request that you approve with `cemi approve`.

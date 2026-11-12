@@ -17,6 +17,8 @@ the key's own vault, then in the global one.
 | Connector | Creates | Revokes | Notices a deleted key |
 |---|---|---|---|
 | `supabase-key` | A Supabase secret API key (`sb_secret_…`) through the Management API | Deletes it, telling Supabase whether it leaked | Yes |
+| `cloudflare-token` | A Cloudflare API token with the same permissions (and IP limits) as the current one | Deletes the old token | Yes, and disabled or expired tokens |
+| `resend-key` | A Resend API key, full access or sending only (optionally for one domain) | Deletes it, when Cemí created it | Yes |
 | `command` | Your program prints the new value | Your program gets the old value on stdin | No |
 | `external` | See [External connectors](#external-connectors) | | |
 
@@ -25,7 +27,22 @@ cemi origin set acme/shop/supabase#key -e prod supabase-key \
   --project abcdefghijklmnopqrst --token global:accounts/supabase#token
 
 cemi origin set acme/shop/webhook#secret -e prod command -- ./scripts/webhook-key
+
+cemi origin set acme/shop/cloudflare#token -e prod cloudflare-token \
+  --token global:accounts/cloudflare#admin --name "shop deploy"
+
+cemi origin set acme/shop/resend#key -e prod resend-key \
+  --token global:accounts/resend#admin --permission sending_access --domain <domain id>
 ```
+
+`cloudflare-token` needs a current token to copy: Cemí asks Cloudflare which token the current
+value is (`/user/tokens/verify`, signed in with that same value), reads its permissions with the
+admin token and creates a new token with them. The old one keeps working until the rotation
+deletes it, so a failed destination can still go back to it. Rolling a token in place is not
+used, because it stops the old value at once. For tokens owned by an account instead of your
+user, add `--account <account id>`. A key that Cemí did not create through `resend-key` has an
+id Cemí does not know, so the first rotation tells you to delete the old one in the Resend
+dashboard; later rotations delete it themselves.
 
 A `command` origin is called as `<command> create` (print the new value on stdout) and
 `<command> revoke` (the old value arrives on stdin; the variable `CEMI_COMPROMISED` is `1` when
@@ -41,7 +58,11 @@ an API).
 |---|---|---|
 | `github` | A GitHub Actions secret, of the repository or of one of its environments, sealed to the repository's public key | Yes, by its update time |
 | `supabase-secret` | A Supabase Edge Function secret | Yes, by the digest Supabase reports |
+| `cloudflare-worker` | A Cloudflare Workers secret | Only whether it exists (Cloudflare reports nothing that changes with the value) |
+| `netlify` | A Netlify environment variable of a site, or of the whole team, for one deploy context | Yes, by the variable's update time (any context of the variable counts) |
+| `vercel` | A Vercel project environment variable for one target (sensitive for production and preview) | Yes, by its update time |
 | `dotenv` | One variable of a `.env` file on this computer (the rest of the file is kept) | Yes |
+| `ssh` | One variable of a `.env` file on a server, through your `ssh`; optionally restarts a service | Yes |
 | `command` | Your program gets the value on stdin | No |
 | `external` | See below | If the connector supports it |
 
@@ -50,6 +71,10 @@ cemi dest add acme/shop/stripe#key -e prod github --repo acme/shop --name STRIPE
 cemi dest add acme/shop/stripe#key -e prod supabase-secret --project abcdefghijklmnopqrst --name STRIPE_KEY --token global:accounts/supabase#token
 cemi dest add acme/shop/stripe#key -e dev dotenv --file .env.local --key STRIPE_KEY
 cemi dest add acme/shop/stripe#key -e prod command -- npx wrangler secret put STRIPE_KEY
+cemi dest add acme/shop/stripe#key -e prod cloudflare-worker --account <account id> --script shop-api --name STRIPE_KEY --token global:accounts/cloudflare#workers
+cemi dest add acme/shop/stripe#key -e prod netlify --account acme --site <site id> --key STRIPE_KEY --context production --token global:accounts/netlify#token
+cemi dest add acme/shop/stripe#key -e prod vercel --project shop --key STRIPE_KEY --target production --token global:accounts/vercel#token
+cemi dest add acme/shop/stripe#key -e prod ssh --host deploy@shop.example.com --file /srv/shop/.env --key STRIPE_KEY --restart "sudo systemctl restart shop"
 ```
 
 - `github` uses the GitHub CLI's login (`gh auth login`) unless you give `--token`. For GitHub
@@ -58,6 +83,19 @@ cemi dest add acme/shop/stripe#key -e prod command -- npx wrangler secret put ST
   `wrangler secret put`, `vercel env add`. For anything else, a small script of yours can read
   stdin and do the rest. A destination can also be an action, such as a redeploy, that ignores
   its input.
+- `netlify` creates the variable as secret ("contains secret values": readable only by code
+  running on Netlify, for builds, functions and runtime) unless you add `--plain`. Netlify does
+  not let you unmark a secret. Without `--site`, the variable belongs to the whole team.
+- `vercel` stores production and preview values as sensitive (not readable back, not even in
+  the dashboard); Vercel does not allow sensitive variables for development, so those are
+  encrypted. Add `--team <team id>` for projects of a team.
+- `ssh` runs your own `ssh` program, so `~/.ssh/config`, the agent and `known_hosts` apply. It
+  runs without asking for passwords (`BatchMode`): use a key or the agent, and connect once by
+  hand so ssh knows the host key. Cemí reads the file over SSH, changes the variable with the
+  same rules as local `.env` files, and sends the whole file back on stdin; the server replaces
+  it only if it still has the content Cemí read, so a change made in between is never lost.
+  Values travel only on stdin, never in the command line. The server needs a POSIX `sh`, and
+  `sha256sum`, `shasum` or `openssl`. `--restart` runs on the server after the file changes.
 - Templates are destinations too: if `db#url` is `postgres://app:{{db#password}}@…` and has a
   destination, rotating `db#password` updates it.
 
@@ -75,6 +113,30 @@ vault's value back, and `cemi set` keeps the new one. Through MCP, an AI client 
 these; a person decides.
 
 Values only travel over HTTPS. Plain `http://` is refused, except for `localhost`.
+
+### Permissions for provider tokens
+
+Give each credential the least it needs. A token that can create tokens is powerful: keep it in
+a record of its own, and protect the environment it belongs to.
+
+| Connector | Credential | Permission |
+|---|---|---|
+| `github` | Fine-grained token for the repository | Secrets: read and write (Environments: read and write, for environment secrets) |
+| `supabase-key`, `supabase-secret` | Supabase personal access token | Access to the project |
+| `cloudflare-token` | Cloudflare API token | User → API Tokens: Edit (account-owned tokens: Account API Tokens: Edit) |
+| `cloudflare-worker` | Cloudflare API token | Account → Workers Scripts: Edit |
+| `resend-key` | Resend API key | Full access (sending-only keys cannot manage keys) |
+| `netlify` | Netlify personal access token | Personal access tokens act as your whole user: prefer a user that belongs only to the team |
+| `vercel` | Vercel access token | Scoped to the team that owns the project |
+| `ssh` | Your ssh keys | A server account that can write the `.env` file (and run `--restart`) |
+
+Endpoints used (checked in November 2026): Cloudflare
+[user tokens](https://developers.cloudflare.com/api/resources/user/subresources/tokens/),
+[account tokens](https://developers.cloudflare.com/api/resources/accounts/subresources/tokens/) and
+[Workers secrets](https://developers.cloudflare.com/api/resources/workers/subresources/scripts/subresources/secrets/);
+Resend [API keys](https://resend.com/docs/api-reference/api-keys/create-api-key);
+Netlify [environment variables](https://open-api.netlify.com/);
+Vercel [project environment variables](https://vercel.com/docs/rest-api/reference/endpoints/projects/create-one-or-more-environment-variables).
 
 ## Protected environments
 

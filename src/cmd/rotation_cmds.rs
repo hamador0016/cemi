@@ -145,6 +145,30 @@ pub fn origin(ctx: &mut Ctx, cmd: OriginCmd) -> Result<i32> {
                     name,
                     api_url,
                 },
+                OriginKind::CloudflareToken {
+                    token,
+                    account,
+                    name,
+                    api_url,
+                } => OriginSpec::CloudflareToken {
+                    token: credential_ref(ctx, &token, fr.scope)?,
+                    account,
+                    name,
+                    api_url,
+                },
+                OriginKind::ResendKey {
+                    token,
+                    name,
+                    permission,
+                    domain,
+                    api_url,
+                } => OriginSpec::ResendKey {
+                    token: credential_ref(ctx, &token, fr.scope)?,
+                    name,
+                    permission,
+                    domain,
+                    api_url,
+                },
                 OriginKind::Command { command } => OriginSpec::Command { command },
                 OriginKind::External { name, set, secret } => OriginSpec::External {
                     name,
@@ -226,10 +250,70 @@ pub fn dest(ctx: &mut Ctx, cmd: DestCmd) -> Result<i32> {
                     token: credential_ref(ctx, &token, fr.scope)?,
                     api_url,
                 },
+                DestKind::CloudflareWorker {
+                    account,
+                    script,
+                    name,
+                    token,
+                    api_url,
+                } => DestSpec::CloudflareWorker {
+                    account,
+                    script,
+                    name,
+                    token: credential_ref(ctx, &token, fr.scope)?,
+                    api_url,
+                },
+                DestKind::Netlify {
+                    account,
+                    site,
+                    key,
+                    context,
+                    plain,
+                    token,
+                    api_url,
+                } => DestSpec::Netlify {
+                    account,
+                    site,
+                    key,
+                    context,
+                    secret: !plain,
+                    token: credential_ref(ctx, &token, fr.scope)?,
+                    api_url,
+                },
+                DestKind::Vercel {
+                    project,
+                    key,
+                    target,
+                    team,
+                    token,
+                    api_url,
+                } => DestSpec::Vercel {
+                    project,
+                    key,
+                    target,
+                    team,
+                    token: credential_ref(ctx, &token, fr.scope)?,
+                    api_url,
+                },
                 DestKind::Dotenv { file, key } => {
                     let file = std::path::absolute(ctx.ws.cwd.join(file))?;
                     DestSpec::Dotenv { file, key }
                 }
+                DestKind::Ssh {
+                    host,
+                    port,
+                    file,
+                    key,
+                    restart,
+                    ssh_program,
+                } => DestSpec::Ssh {
+                    host,
+                    port,
+                    file,
+                    key,
+                    restart,
+                    program: (!ssh_program.is_empty()).then_some(ssh_program),
+                },
                 DestKind::Command { command } => DestSpec::Command { command },
                 DestKind::External { name, set, secret } => DestSpec::External {
                     name,

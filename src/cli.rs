@@ -640,6 +640,37 @@ pub enum OriginKind {
         #[arg(long, hide = true)]
         api_url: Option<String>,
     },
+    /// A Cloudflare API token: each new one copies the permissions of the current one
+    CloudflareToken {
+        /// record#field with a token allowed to create and delete tokens (API Tokens Write)
+        #[arg(long)]
+        token: String,
+        /// For account-owned tokens: the account id (default: tokens of your user)
+        #[arg(long)]
+        account: Option<String>,
+        /// Base name for the tokens; Cemí adds the date
+        #[arg(long, default_value = "cemi")]
+        name: String,
+        #[arg(long, hide = true)]
+        api_url: Option<String>,
+    },
+    /// A Resend API key, created and deleted through the Resend API
+    ResendKey {
+        /// record#field with a full-access Resend key
+        #[arg(long)]
+        token: String,
+        /// Base name for the keys; Cemí adds the date
+        #[arg(long, default_value = "cemi")]
+        name: String,
+        /// full_access or sending_access
+        #[arg(long, default_value = "sending_access")]
+        permission: String,
+        /// With sending_access: the id of the only domain it may send from
+        #[arg(long)]
+        domain: Option<String>,
+        #[arg(long, hide = true)]
+        api_url: Option<String>,
+    },
     /// Your program: `COMMAND create` prints a new value, `COMMAND revoke` gets the old one on stdin
     Command {
         #[arg(trailing_var_arg = true, required = true, value_name = "COMMAND")]
@@ -713,6 +744,66 @@ pub enum DestKind {
         #[arg(long, hide = true)]
         api_url: Option<String>,
     },
+    /// A Cloudflare Workers secret
+    CloudflareWorker {
+        /// Account id (32 characters, in the dashboard)
+        #[arg(long)]
+        account: String,
+        /// Worker name
+        #[arg(long)]
+        script: String,
+        /// Secret name
+        #[arg(long)]
+        name: String,
+        /// record#field with a token allowed to edit Workers (Workers Scripts Write)
+        #[arg(long)]
+        token: String,
+        #[arg(long, hide = true)]
+        api_url: Option<String>,
+    },
+    /// A Netlify environment variable of a site (or of the whole team), for one deploy context
+    Netlify {
+        /// Team slug (app.netlify.com/teams/SLUG)
+        #[arg(long)]
+        account: String,
+        /// Site id (default: a variable of the whole team)
+        #[arg(long)]
+        site: Option<String>,
+        /// Variable name
+        #[arg(long)]
+        key: String,
+        /// production, deploy-preview, branch-deploy, dev or all
+        #[arg(long, default_value = "production")]
+        context: String,
+        /// Create it as a normal variable, readable in the dashboard (default: secret)
+        #[arg(long)]
+        plain: bool,
+        /// record#field with a Netlify personal access token
+        #[arg(long)]
+        token: String,
+        #[arg(long, hide = true)]
+        api_url: Option<String>,
+    },
+    /// A Vercel project environment variable for one target
+    Vercel {
+        /// Project name or id
+        #[arg(long)]
+        project: String,
+        /// Variable name
+        #[arg(long)]
+        key: String,
+        /// production, preview or development
+        #[arg(long, default_value = "production")]
+        target: String,
+        /// Team id, for projects of a team
+        #[arg(long)]
+        team: Option<String>,
+        /// record#field with a Vercel access token
+        #[arg(long)]
+        token: String,
+        #[arg(long, hide = true)]
+        api_url: Option<String>,
+    },
     /// A variable in a .env file on this computer
     Dotenv {
         #[arg(long, default_value = ".env")]
@@ -720,6 +811,26 @@ pub enum DestKind {
         /// Variable name
         #[arg(long)]
         key: String,
+    },
+    /// A variable in a .env file on a server, through your ssh (keys or agent, no passwords)
+    Ssh {
+        /// user@server, or a Host from ~/.ssh/config
+        #[arg(long)]
+        host: String,
+        #[arg(long)]
+        port: Option<u16>,
+        /// Path of the .env file on the server
+        #[arg(long)]
+        file: String,
+        /// Variable name
+        #[arg(long)]
+        key: String,
+        /// Command run on the server after the file changes, like 'systemctl restart app'
+        #[arg(long)]
+        restart: Option<String>,
+        /// Another ssh program; repeat for its first arguments
+        #[arg(long = "ssh-program", hide = true)]
+        ssh_program: Vec<String>,
     },
     /// A program that receives the value on stdin: -- gh secret set NAME
     Command {

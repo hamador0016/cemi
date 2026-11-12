@@ -24,7 +24,7 @@ production secrets.
 | Forgotten password | Recovery code (256 bits) created with every vault. `cemi recovery verify` checks it. |
 | A leaked key keeps working | `cemi rotate` / `cemi incident --rotate` replace it at its origin and in every destination, then revoke the old one (telling the provider it leaked when the API allows it). |
 | A prompt-injected AI changes production | Pushes, rotations and revocations in protected environments (`prod`, `production` by default) need the vault password typed by a person. Through MCP they only create a request for `cemi approve`, which expires in one hour and works once. A token limited to some environments cannot rotate a value shared by all of them. |
-| An AI sends a secret somewhere new | Destinations, origins and API addresses are set only from the command line, never through MCP. Giving a key of a protected environment an API address needs the password. Values travel only over HTTPS (plain http is refused except for localhost). |
+| An AI sends a secret somewhere new | Destinations, origins and API addresses are set only from the command line, never through MCP. Giving a key of a protected environment an API address needs the password. Values travel only over HTTPS (plain http is refused except for localhost), or over SSH with your own `ssh`, which checks the server's host key. |
 | An AI needs a production key to test an API | The credential proxy (MCP `call_api`, `cemi run --proxy`) adds the key itself and sends the request only to the API's address, only for the methods and paths allowed with `cemi api add`. Paths with `..`, encoded slashes or backslashes are refused, redirects are not followed, and the key is hidden in answers. The local proxy listens on 127.0.0.1 under a random path that only the command it serves knows. |
 | A failed rotation breaks a service | The new value is saved as pending before anything changes. If a destination or the `verify` check fails, the old value is written back to every destination already changed, and the unused new key is deleted at the provider. |
 | Someone with the repository reads the CI secrets | `cemi.ci.age` is encrypted with age to a key made only for CI, kept in the CI's secret store (`CEMI_CI_KEY`). It holds only the variables of one environment, and only those chosen with `--only` or `[ci] vars`. Exporting a protected environment asks for the password. In GitHub Actions every value is masked in the log. If the CI key leaks, the values in every copy of the file in git history are exposed: replace the key and those values. |
@@ -52,7 +52,11 @@ production secrets.
 8. **Calls the rules allow.** The proxy keeps the key away from the caller, not the damage a
    call can do: with `POST /v1/refunds` allowed, an AI can make refunds. Allow only what the
    task needs, and prefer keys with limited permissions at the provider.
-9. **Providers that cannot revoke.** Without an origin that supports it, the old key is revoked by
+9. **The places values are copied to.** A value sent to a provider or written to a server is as
+   safe as that account and that machine. Provider tokens that can create other tokens (such as
+   the one `cloudflare-token` uses) are powerful: give them the narrowest permission listed in
+   [docs/connectors.md](connectors.md).
+10. **Providers that cannot revoke.** Without an origin that supports it, the old key is revoked by
    hand; Cemí says so and keeps it as an archived version.
 
 ## Design rules
