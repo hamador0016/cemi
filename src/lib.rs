@@ -12,6 +12,7 @@ pub mod discover;
 pub mod dotenv;
 pub mod errors;
 pub mod mcp;
+pub mod mcp_clients;
 pub mod model;
 pub mod presence;
 pub mod presets;

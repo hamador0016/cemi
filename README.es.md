@@ -166,6 +166,29 @@ cemi token create claude --allow read --allow run --env dev --expires 7d
 cemi mcp setup claude-code --token-name claude
 ```
 
+`cemi mcp setup` también conoce `claude-desktop`, `cursor`, `vscode` (GitHub Copilot),
+`windsurf`, `devin`, `zed`, `codex` (OpenAI Codex CLI) y `gemini` (Gemini CLI). Agrega un
+servidor llamado `cemi` a la configuración del cliente y deja igual los demás servidores y
+ajustes del archivo; la entrada no lleva ningún secreto, solo el comando
+`cemi mcp serve --token-name claude`.
+
+| Cliente | Bóveda del proyecto | Bóveda global (`cemi --global mcp setup …`) |
+|---|---|---|
+| `claude-code` | corre `claude mcp add --scope project` | corre `claude mcp add --scope user` |
+| `claude-desktop` | — | `claude_desktop_config.json` en la carpeta de Claude |
+| `cursor` | `.cursor/mcp.json` | `~/.cursor/mcp.json` |
+| `vscode` | `.mcp.json` | `~/.copilot/mcp-config.json` (o `$COPILOT_HOME`) |
+| `windsurf` | — | `~/.codeium/windsurf/mcp_config.json` |
+| `devin` | `.devin/mcp_config.json` | `devin/mcp_config.json` en la carpeta de configuración |
+| `zed` | `.zed/settings.json` | el `settings.json` de Zed |
+| `codex` | `.codex/config.toml` (proyectos de confianza) | `~/.codex/config.toml` (o `$CODEX_HOME`) |
+| `gemini` | `.gemini/settings.json` | `~/.gemini/settings.json` |
+
+Claude Desktop y Windsurf no tienen configuración por proyecto, así que usan la bóveda global.
+Un archivo que no es JSON puro (Zed y otros aceptan comentarios) queda como estaba, y Cemí
+muestra lo que hay que agregar. `--print` solo lo muestra, para cualquier cliente; `other`
+muestra un fragmento `mcpServers` genérico. El cliente encuentra `cemi` en su `PATH`.
+
 Y en `cemi.toml`, lo que la IA puede correr:
 
 ```toml

@@ -1116,12 +1116,23 @@ pub enum McpCmd {
         #[arg(long)]
         token_name: Option<String>,
     },
-    /// Connect an AI client to Cemí
+    /// Connect an AI client to Cemí: adds the server "cemi" to the client's configuration
+    #[command(
+        after_help = "With a project vault, the client's project file is written in the project folder         (.cursor/mcp.json, .mcp.json for VS Code, .zed/settings.json, .codex/config.toml, .gemini/settings.json,         .devin/mcp_config.json); with --global, the client's file for every project.         Claude Desktop and Windsurf only have the second. Other servers and settings in the file are kept.         `other` prints a generic snippet.
+
+        Examples:
+          cemi mcp setup cursor --token-name claude
+          cemi --global mcp setup claude-desktop --token-name claude
+          cemi mcp setup zed --token-name claude --print    # only show what to add"
+    )]
     Setup {
-        /// claude-code, claude-desktop, cursor or other
+        #[arg(value_parser = clap::builder::PossibleValuesParser::new(crate::mcp_clients::CLIENT_NAMES))]
         client: String,
         #[arg(long)]
         token_name: String,
+        /// Only print what to add to the client's configuration; change nothing
+        #[arg(long)]
+        print: bool,
     },
     /// Register another MCP server with keys injected: cemi mcp add supabase --env TOKEN=cuentas/supabase#token -- npx -y @supabase/mcp-server-supabase
     Add {

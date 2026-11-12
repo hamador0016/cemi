@@ -8,6 +8,7 @@ use super::Ctx;
 use crate::cli::{McpCmd, TokenCmd};
 use crate::crypto;
 use crate::mcp;
+use crate::mcp_clients;
 use crate::model::{Launcher, Token, validate_name};
 use crate::refs::Ref;
 use crate::resolve;
@@ -206,7 +207,11 @@ pub fn mcp(mut ctx: Ctx, cmd: McpCmd) -> Result<i32> {
             };
             mcp::serve(cwd, sel, token)
         }
-        McpCmd::Setup { client, token_name } => {
+        McpCmd::Setup {
+            client,
+            token_name,
+            print,
+        } => {
             let scope = ctx.scope()?;
             let vault_id = mcp::vault_id(&ctx.ws.cwd, ctx.sel())?;
             if session::load_token(&token_key(&vault_id, &token_name)).is_none() {
@@ -223,6 +228,15 @@ pub fn mcp(mut ctx: Ctx, cmd: McpCmd) -> Result<i32> {
             if ctx.global {
                 args.insert(0, "--global".into());
             }
+            let project_dir = match scope {
+                crate::vault::Scope::Local => ctx
+                    .ws
+                    .local_dir
+                    .as_ref()
+                    .and_then(|d| d.parent())
+                    .map(|d| d.to_path_buf()),
+                crate::vault::Scope::Global => None,
+            };
             match client.as_str() {
                 "claude-code" => {
                     let claude_scope = if scope == crate::vault::Scope::Local {
@@ -230,10 +244,28 @@ pub fn mcp(mut ctx: Ctx, cmd: McpCmd) -> Result<i32> {
                     } else {
                         "user"
                     };
+                    let line = format!(
+                        "claude mcp add --scope {claude_scope} {} -- cemi {}",
+                        mcp_clients::SERVER,
+                        args.join(" ")
+                    );
+                    if print {
+                        eprintln!("Run this (it holds no secret):");
+                        crate::outln!("{line}");
+                        return Ok(0);
+                    }
                     let mut cmd = std::process::Command::new(runner::resolve_program("claude"));
-                    cmd.args(["mcp", "add", "--scope", claude_scope, "cemi", "--", "cemi"])
-                        .args(&args)
-                        .current_dir(&ctx.ws.cwd);
+                    cmd.args([
+                        "mcp",
+                        "add",
+                        "--scope",
+                        claude_scope,
+                        mcp_clients::SERVER,
+                        "--",
+                        "cemi",
+                    ])
+                    .args(&args)
+                    .current_dir(&ctx.ws.cwd);
                     match cmd.status() {
                         Ok(s) if s.success() => {
                             ui::ok(format!("Claude Code now uses Cemí ({claude_scope} scope)"));
@@ -241,17 +273,14 @@ pub fn mcp(mut ctx: Ctx, cmd: McpCmd) -> Result<i32> {
                         }
                         _ => {
                             ui::warn("could not run `claude mcp add`. Run it yourself:");
-                            crate::outln!(
-                                "claude mcp add --scope {claude_scope} cemi -- cemi {}",
-                                args.join(" ")
-                            );
+                            crate::outln!("{line}");
                             Ok(1)
                         }
                     }
                 }
-                _ => {
+                "other" => {
                     let snippet = serde_json::json!({
-                        "mcpServers": { "cemi": { "command": "cemi", "args": args } }
+                        "mcpServers": { mcp_clients::SERVER: { "command": "cemi", "args": args } }
                     });
                     eprintln!("Add this to your client's MCP configuration (it holds no secret):");
                     crate::outln!("{}", serde_json::to_string_pretty(&snippet)?);
@@ -261,6 +290,11 @@ pub fn mcp(mut ctx: Ctx, cmd: McpCmd) -> Result<i32> {
                         );
                     }
                     Ok(0)
+                }
+                name => {
+                    let c = mcp_clients::Client::parse(name)
+                        .ok_or_else(|| anyhow!("unknown client {name:?}"))?;
+                    setup_client(c, project_dir.as_deref(), &args, print)
                 }
             }
         }
@@ -354,4 +388,73 @@ pub fn mcp(mut ctx: Ctx, cmd: McpCmd) -> Result<i32> {
             runner::run_interactive(&launcher.command, &prepared, None)
         }
     }
+}
+
+/// Writes the Cemí server into a client's configuration file (or only prints
+/// it with `--print`).
+fn setup_client(
+    c: mcp_clients::Client,
+    project_dir: Option<&std::path::Path>,
+    args: &[String],
+    print: bool,
+) -> Result<i32> {
+    let title = c.title();
+    let path = match (project_dir, c.project_file()) {
+        (Some(dir), Some(rel)) => dir.join(rel),
+        (Some(_), None) => bail!(
+            "{title} has no project configuration and does not start servers in this project,              so it cannot use the project vault. Use the global vault: cemi --global mcp setup {} --token-name <name>",
+            client_name(c)
+        ),
+        (None, _) => c.user_file()?,
+    };
+    let snippet = c.snippet(args);
+    if print {
+        eprintln!(
+            "For {title}, add this to {} (it holds no secret):",
+            path.display()
+        );
+        crate::outln!("{snippet}");
+        return Ok(0);
+    }
+    let outcome = mcp_clients::write(c, &path, args)?;
+    let shown = path.display();
+    let done = match &outcome {
+        mcp_clients::Outcome::Created => format!("Created {shown} with the server \"cemi\""),
+        mcp_clients::Outcome::Added => format!("Added the server \"cemi\" to {shown}"),
+        mcp_clients::Outcome::Replaced => format!("Replaced the server \"cemi\" in {shown}"),
+        mcp_clients::Outcome::Unchanged => format!("{shown} already has the server \"cemi\""),
+        mcp_clients::Outcome::Refused(why) => {
+            ui::warn(format!(
+                "{shown} was left as it was: {why}. Add this to it yourself (it holds no secret):"
+            ));
+            crate::outln!("{snippet}");
+            ui::data(serde_json::json!({
+                "client": client_name(c), "path": shown.to_string(), "written": false,
+            }));
+            return Ok(1);
+        }
+    };
+    ui::ok(format!("{title}: {done}"));
+    if outcome != mcp_clients::Outcome::Unchanged {
+        for line in snippet.lines() {
+            eprintln!("    {line}");
+        }
+    }
+    if c == mcp_clients::Client::Codex && project_dir.is_some() {
+        eprintln!("  Codex reads .codex/config.toml only in projects you trust.");
+    }
+    eprintln!("  Restart {title} (or reload its MCP servers) to use it.");
+    ui::data(serde_json::json!({
+        "client": client_name(c),
+        "path": shown.to_string(),
+        "written": outcome != mcp_clients::Outcome::Unchanged,
+    }));
+    Ok(0)
+}
+
+fn client_name(c: mcp_clients::Client) -> &'static str {
+    mcp_clients::CLIENT_NAMES
+        .into_iter()
+        .find(|n| mcp_clients::Client::parse(n) == Some(c))
+        .expect("every client has a name")
 }
