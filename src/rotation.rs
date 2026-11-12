@@ -765,7 +765,17 @@ pub fn rotate(
                             env_label(&slot)
                         );
                     };
-                    let k = connectors::create(&o.spec, ws, slot_env(&slot))?;
+                    let current = f
+                        .values
+                        .get(&slot)
+                        .and_then(|s| s.current_version())
+                        .map(|v| v.value.bytes());
+                    let k = connectors::create(
+                        &o.spec,
+                        ws,
+                        slot_env(&slot),
+                        current.as_ref().map(|v| v.as_slice()),
+                    )?;
                     (
                         k.value,
                         k.provider_id,

@@ -1,18 +1,25 @@
 //! Connectors: where a key is created (origins) and where it is copied to
 //! (destinations).
 //!
-//! Built in: Supabase API keys (origin), GitHub Actions secrets, Supabase
-//! function secrets and `.env` files (destinations), and commands (both).
+//! Built in: Supabase, Cloudflare and Resend API keys (origins); GitHub
+//! Actions secrets, Supabase function secrets, Cloudflare Workers secrets,
+//! Netlify and Vercel variables, `.env` files here or on a server over SSH
+//! (destinations); and commands (both).
 //! Anyone can add a provider as an external program, `cemi-connector-<name>`,
 //! that speaks JSON on stdin/stdout (see docs/connectors.md).
 //!
 //! Values travel only in request bodies and stdin, never as arguments.
 //! Credentials for providers are references to other records of the vault.
 
+mod cloudflare;
 mod command;
 mod github;
 mod http;
+mod netlify;
+mod resend;
+mod ssh;
 mod supabase;
+mod vercel;
 
 use std::collections::BTreeMap;
 use std::path::{Path, PathBuf};
@@ -38,6 +45,32 @@ pub enum OriginSpec {
         token: String,
         /// Base name for the keys; Cemí adds the date.
         name: String,
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        api_url: Option<String>,
+    },
+    /// A Cloudflare API token. A new one copies the permissions of the
+    /// current one; the old one is deleted when the rotation is done.
+    CloudflareToken {
+        /// Reference to a token allowed to create and delete tokens.
+        token: String,
+        /// For account-owned tokens; None: tokens of your user.
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        account: Option<String>,
+        /// Base name for the tokens; Cemí adds the date.
+        name: String,
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        api_url: Option<String>,
+    },
+    /// A Resend API key.
+    ResendKey {
+        /// Reference to a full-access Resend key.
+        token: String,
+        name: String,
+        /// full_access or sending_access.
+        permission: String,
+        /// For sending_access: the only domain it may send from.
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        domain: Option<String>,
         #[serde(default, skip_serializing_if = "Option::is_none")]
         api_url: Option<String>,
     },
@@ -79,8 +112,59 @@ pub enum DestSpec {
         #[serde(default, skip_serializing_if = "Option::is_none")]
         api_url: Option<String>,
     },
+    /// A Cloudflare Workers secret.
+    CloudflareWorker {
+        account: String,
+        script: String,
+        name: String,
+        token: String,
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        api_url: Option<String>,
+    },
+    /// A Netlify environment variable of a site (or of the whole team), for
+    /// one deploy context.
+    Netlify {
+        /// Team slug.
+        account: String,
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        site: Option<String>,
+        key: String,
+        context: String,
+        /// Netlify's "contains secret values" (write-only once set).
+        secret: bool,
+        token: String,
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        api_url: Option<String>,
+    },
+    /// A Vercel project environment variable for one target.
+    Vercel {
+        project: String,
+        key: String,
+        target: String,
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        team: Option<String>,
+        token: String,
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        api_url: Option<String>,
+    },
     /// One variable of a `.env` file on this computer.
     Dotenv { file: PathBuf, key: String },
+    /// One variable of a `.env` file on a server, over SSH.
+    Ssh {
+        /// user@server, or a Host of ~/.ssh/config.
+        host: String,
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        port: Option<u16>,
+        /// Path on the server.
+        file: String,
+        key: String,
+        /// Run on the server after the file changes.
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        restart: Option<String>,
+        /// Another ssh program and its first arguments (tests).
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        program: Option<Vec<String>>,
+    },
     /// A program that receives the value on stdin, like
     /// `gh secret set NAME` or `wrangler secret put NAME`.
     Command { command: Vec<String> },
@@ -128,6 +212,11 @@ impl OriginSpec {
             OriginSpec::SupabaseKey { project, name, .. } => {
                 format!("Supabase project {project}: secret API key \"{name}_…\"")
             }
+            OriginSpec::CloudflareToken { account, name, .. } => match account {
+                Some(a) => format!("Cloudflare account {a}: API token \"{name} …\""),
+                None => format!("Cloudflare: API token \"{name} …\""),
+            },
+            OriginSpec::ResendKey { name, .. } => format!("Resend: API key \"{name} …\""),
             OriginSpec::Command { command } => format!("command `{}`", command.join(" ")),
             OriginSpec::External { name, .. } => format!("connector {name}"),
         }
@@ -136,7 +225,9 @@ impl OriginSpec {
     /// Credentials this origin reads from the vault.
     pub fn references(&self) -> Vec<&str> {
         match self {
-            OriginSpec::SupabaseKey { token, .. } => vec![token.as_str()],
+            OriginSpec::SupabaseKey { token, .. }
+            | OriginSpec::CloudflareToken { token, .. }
+            | OriginSpec::ResendKey { token, .. } => vec![token.as_str()],
             OriginSpec::External { secrets, .. } => secrets.values().map(String::as_str).collect(),
             OriginSpec::Command { .. } => vec![],
         }
@@ -158,7 +249,29 @@ impl DestSpec {
             DestSpec::SupabaseSecret { project, name, .. } => {
                 format!("Supabase project {project}: function secret {name}")
             }
+            DestSpec::CloudflareWorker { script, name, .. } => {
+                format!("Cloudflare Worker {script}: secret {name}")
+            }
+            DestSpec::Netlify {
+                account,
+                site,
+                key,
+                context,
+                ..
+            } => match site {
+                Some(s) => format!("Netlify site {s}: {key} ({context})"),
+                None => format!("Netlify team {account}: {key} ({context})"),
+            },
+            DestSpec::Vercel {
+                project,
+                key,
+                target,
+                ..
+            } => format!("Vercel project {project}: {key} ({target})"),
             DestSpec::Dotenv { file, key } => format!("{} ({key})", file.display()),
+            DestSpec::Ssh {
+                host, file, key, ..
+            } => format!("{host}:{file} ({key})"),
             DestSpec::Command { command } => format!("command `{}`", command.join(" ")),
             DestSpec::External { name, .. } => format!("connector {name}"),
         }
@@ -167,9 +280,12 @@ impl DestSpec {
     pub fn references(&self) -> Vec<&str> {
         match self {
             DestSpec::Github { token, .. } => token.iter().map(String::as_str).collect(),
-            DestSpec::SupabaseSecret { token, .. } => vec![token.as_str()],
+            DestSpec::SupabaseSecret { token, .. }
+            | DestSpec::CloudflareWorker { token, .. }
+            | DestSpec::Netlify { token, .. }
+            | DestSpec::Vercel { token, .. } => vec![token.as_str()],
             DestSpec::External { secrets, .. } => secrets.values().map(String::as_str).collect(),
-            DestSpec::Dotenv { .. } | DestSpec::Command { .. } => vec![],
+            DestSpec::Dotenv { .. } | DestSpec::Ssh { .. } | DestSpec::Command { .. } => vec![],
         }
     }
 
@@ -199,10 +315,58 @@ impl DestSpec {
                     http::check_url(u)?;
                 }
             }
+            DestSpec::CloudflareWorker {
+                account,
+                script,
+                name,
+                api_url,
+                ..
+            } => {
+                cloudflare::validate_account(account)?;
+                cloudflare::validate_script(script)?;
+                cloudflare::validate_secret_name(name)?;
+                check_api(api_url)?;
+            }
+            DestSpec::Netlify {
+                account,
+                site,
+                key,
+                context,
+                api_url,
+                ..
+            } => {
+                netlify::validate(account, site.as_deref(), key, context)?;
+                check_api(api_url)?;
+            }
+            DestSpec::Vercel {
+                project,
+                key,
+                target,
+                team,
+                api_url,
+                ..
+            } => {
+                vercel::validate(project, key, target, team.as_deref())?;
+                check_api(api_url)?;
+            }
             DestSpec::Dotenv { file, key } => {
                 crate::dotenv::check_var_name(key)?;
                 if !file.is_absolute() {
                     bail!("internal error: .env paths are stored absolute");
+                }
+            }
+            DestSpec::Ssh {
+                host,
+                file,
+                key,
+                restart,
+                program,
+                ..
+            } => {
+                ssh::validate(host, file, restart.as_deref())?;
+                crate::dotenv::check_var_name(key)?;
+                if program.as_ref().is_some_and(Vec::is_empty) {
+                    bail!("the ssh program cannot be empty");
                 }
             }
             DestSpec::Command { command } => {
@@ -231,6 +395,29 @@ impl OriginSpec {
                     http::check_url(u)?;
                 }
             }
+            OriginSpec::CloudflareToken {
+                account,
+                name,
+                api_url,
+                ..
+            } => {
+                if let Some(a) = account {
+                    cloudflare::validate_account(a)?;
+                }
+                cloudflare::validate_token_name(name)?;
+                check_api(api_url)?;
+            }
+            OriginSpec::ResendKey {
+                name,
+                permission,
+                domain,
+                api_url,
+                ..
+            } => {
+                resend::validate_name(name)?;
+                resend::validate_permission(permission, domain.as_deref())?;
+                check_api(api_url)?;
+            }
             OriginSpec::Command { command } => {
                 if command.is_empty() {
                     bail!("give the command after --");
@@ -240,6 +427,13 @@ impl OriginSpec {
         }
         Ok(())
     }
+}
+
+fn check_api(api_url: &Option<String>) -> Result<()> {
+    if let Some(u) = api_url {
+        http::check_url(u)?;
+    }
+    Ok(())
 }
 
 /// Resolves a credential reference stored in a connector.
@@ -263,8 +457,14 @@ fn resolve_secrets(
     Ok(out)
 }
 
-/// Creates a new value at the origin.
-pub fn create(spec: &OriginSpec, ws: &mut Workspace, env: Option<&str>) -> Result<NewKey> {
+/// Creates a new value at the origin. `current` is the value in use now
+/// (Cloudflare copies its permissions to the new token).
+pub fn create(
+    spec: &OriginSpec,
+    ws: &mut Workspace,
+    env: Option<&str>,
+    current: Option<&[u8]>,
+) -> Result<NewKey> {
     match spec {
         OriginSpec::SupabaseKey {
             project,
@@ -274,6 +474,38 @@ pub fn create(spec: &OriginSpec, ws: &mut Workspace, env: Option<&str>) -> Resul
         } => {
             let token = credential(ws, token, env)?;
             supabase::create_key(api_url.as_deref(), &token, project, name)
+        }
+        OriginSpec::CloudflareToken {
+            token,
+            account,
+            name,
+            api_url,
+        } => {
+            let token = credential(ws, token, env)?;
+            let current = current.map(text).transpose()?;
+            cloudflare::create_token(
+                api_url.as_deref(),
+                &token,
+                account.as_deref(),
+                name,
+                current,
+            )
+        }
+        OriginSpec::ResendKey {
+            token,
+            name,
+            permission,
+            domain,
+            api_url,
+        } => {
+            let token = credential(ws, token, env)?;
+            resend::create_key(
+                api_url.as_deref(),
+                &token,
+                name,
+                permission,
+                domain.as_deref(),
+            )
         }
         OriginSpec::Command { command } => command::origin_create(command),
         OriginSpec::External {
@@ -310,6 +542,32 @@ pub fn revoke(
             };
             let token = credential(ws, token, env)?;
             supabase::delete_key(api_url.as_deref(), &token, project, id, compromised)?;
+            Ok(Revoked::Done)
+        }
+        OriginSpec::CloudflareToken {
+            token,
+            account,
+            api_url,
+            ..
+        } => {
+            let token = credential(ws, token, env)?;
+            cloudflare::delete_token(
+                api_url.as_deref(),
+                &token,
+                account.as_deref(),
+                provider_id,
+                text(old_value)?,
+            )?;
+            Ok(Revoked::Done)
+        }
+        OriginSpec::ResendKey { token, api_url, .. } => {
+            let Some(id) = provider_id else {
+                return Ok(Revoked::Manual(
+                    "Cemí did not create this key, so it does not know its id. Delete it in the Resend dashboard (API Keys).".into(),
+                ));
+            };
+            let token = credential(ws, token, env)?;
+            resend::delete_key(api_url.as_deref(), &token, id)?;
             Ok(Revoked::Done)
         }
         OriginSpec::Command { command } => command::origin_revoke(command, old_value, compromised),
@@ -350,6 +608,22 @@ pub fn origin_state(
                 }
             })
         }
+        (
+            OriginSpec::CloudflareToken {
+                token,
+                account,
+                api_url,
+                ..
+            },
+            Some(id),
+        ) => {
+            let token = credential(ws, token, env)?;
+            cloudflare::token_state(api_url.as_deref(), &token, account.as_deref(), id)
+        }
+        (OriginSpec::ResendKey { token, api_url, .. }, Some(id)) => {
+            let token = credential(ws, token, env)?;
+            resend::key_state(api_url.as_deref(), &token, id)
+        }
         _ => Ok(OriginState::Unknown),
     }
 }
@@ -383,7 +657,82 @@ pub fn write(spec: &DestSpec, ws: &mut Workspace, env: Option<&str>, value: &[u8
             let token = credential(ws, token, env)?;
             supabase::set_secret(api_url.as_deref(), &token, project, name, text(value)?)
         }
+        DestSpec::CloudflareWorker {
+            account,
+            script,
+            name,
+            token,
+            api_url,
+        } => {
+            let token = credential(ws, token, env)?;
+            cloudflare::put_secret(
+                api_url.as_deref(),
+                &token,
+                account,
+                script,
+                name,
+                text(value)?,
+            )
+        }
+        DestSpec::Netlify {
+            account,
+            site,
+            key,
+            context,
+            secret,
+            token,
+            api_url,
+        } => {
+            let token = credential(ws, token, env)?;
+            netlify::set_var(
+                api_url.as_deref(),
+                &token,
+                account,
+                site.as_deref(),
+                key,
+                context,
+                *secret,
+                text(value)?,
+            )
+        }
+        DestSpec::Vercel {
+            project,
+            key,
+            target,
+            team,
+            token,
+            api_url,
+        } => {
+            let token = credential(ws, token, env)?;
+            vercel::set_var(
+                api_url.as_deref(),
+                &token,
+                project,
+                team.as_deref(),
+                key,
+                target,
+                text(value)?,
+            )
+        }
         DestSpec::Dotenv { file, key } => write_dotenv(file, key, text(value)?),
+        DestSpec::Ssh {
+            host,
+            port,
+            file,
+            key,
+            restart,
+            program,
+        } => ssh::write(
+            &ssh::Server {
+                host,
+                port: *port,
+                program: program.as_deref(),
+            },
+            file,
+            key,
+            text(value)?,
+            restart.as_deref(),
+        ),
         DestSpec::Command { command } => command::dest_write(command, value),
         DestSpec::External {
             name,
@@ -424,7 +773,70 @@ pub fn observe(spec: &DestSpec, ws: &mut Workspace, env: Option<&str>) -> Result
             let token = credential(ws, token, env)?;
             supabase::secret_digest(api_url.as_deref(), &token, project, name)
         }
+        DestSpec::CloudflareWorker {
+            account,
+            script,
+            name,
+            token,
+            api_url,
+        } => {
+            let token = credential(ws, token, env)?;
+            cloudflare::secret_present(api_url.as_deref(), &token, account, script, name)
+        }
+        DestSpec::Netlify {
+            account,
+            site,
+            key,
+            context,
+            token,
+            api_url,
+            ..
+        } => {
+            let token = credential(ws, token, env)?;
+            netlify::observe(
+                api_url.as_deref(),
+                &token,
+                account,
+                site.as_deref(),
+                key,
+                context,
+            )
+        }
+        DestSpec::Vercel {
+            project,
+            key,
+            target,
+            team,
+            token,
+            api_url,
+        } => {
+            let token = credential(ws, token, env)?;
+            vercel::observe(
+                api_url.as_deref(),
+                &token,
+                project,
+                team.as_deref(),
+                key,
+                target,
+            )
+        }
         DestSpec::Dotenv { file, key } => observe_dotenv(file, key),
+        DestSpec::Ssh {
+            host,
+            port,
+            file,
+            key,
+            program,
+            ..
+        } => ssh::observe(
+            &ssh::Server {
+                host,
+                port: *port,
+                program: program.as_deref(),
+            },
+            file,
+            key,
+        ),
         DestSpec::Command { .. } => Ok(Observed::Unknown),
         DestSpec::External {
             name,
@@ -441,16 +853,31 @@ pub fn observe(spec: &DestSpec, ws: &mut Workspace, env: Option<&str>) -> Result
 /// after its own write. The marker itself stays opaque for comparisons.
 pub fn describe_change(spec: &DestSpec, marker: &str) -> String {
     match spec {
-        DestSpec::Github { .. } => match marker
+        DestSpec::Github { .. } | DestSpec::Netlify { .. } => updated(marker),
+        // Vercel gives milliseconds since 1970.
+        DestSpec::Vercel { .. } => match marker
             .strip_prefix("updated ")
-            .and_then(|t| t.parse::<jiff::Timestamp>().ok())
+            .and_then(|t| t.parse::<i64>().ok())
+            .and_then(|ms| jiff::Timestamp::from_millisecond(ms).ok())
         {
             Some(at) => format!("updated {}", crate::ui::when(at, "%Y-%m-%d %H:%M")),
             None => marker.to_string(),
         },
         DestSpec::SupabaseSecret { .. } => "its digest changed".into(),
-        DestSpec::Dotenv { .. } => "the file has another value".into(),
-        DestSpec::Command { .. } | DestSpec::External { .. } => marker.to_string(),
+        DestSpec::Dotenv { .. } | DestSpec::Ssh { .. } => "the file has another value".into(),
+        DestSpec::CloudflareWorker { .. }
+        | DestSpec::Command { .. }
+        | DestSpec::External { .. } => marker.to_string(),
+    }
+}
+
+fn updated(marker: &str) -> String {
+    match marker
+        .strip_prefix("updated ")
+        .and_then(|t| t.parse::<jiff::Timestamp>().ok())
+    {
+        Some(at) => format!("updated {}", crate::ui::when(at, "%Y-%m-%d %H:%M")),
+        None => marker.to_string(),
     }
 }
 

@@ -37,16 +37,21 @@ pub fn connector_program(name: &str) -> PathBuf {
     resolve_program(&format!("cemi-connector-{name}"))
 }
 
-struct Ran {
-    ok: bool,
-    code: Option<i32>,
-    stdout: Zeroizing<Vec<u8>>,
-    stderr: Vec<u8>,
+pub(super) struct Ran {
+    pub ok: bool,
+    pub code: Option<i32>,
+    pub stdout: Zeroizing<Vec<u8>>,
+    pub stderr: Vec<u8>,
 }
 
 /// Runs a program, writing `input` to its stdin from another thread so large
 /// outputs cannot block it.
-fn run(argv: &[String], extra: &[&str], input: &[u8], envs: &[(&str, &str)]) -> Result<Ran> {
+pub(super) fn run(
+    argv: &[String],
+    extra: &[&str],
+    input: &[u8],
+    envs: &[(&str, &str)],
+) -> Result<Ran> {
     let program = argv.first().ok_or_else(|| anyhow!("empty command"))?;
     let mut cmd = Command::new(resolve_program(program));
     cmd.args(&argv[1..])
@@ -77,7 +82,7 @@ fn run(argv: &[String], extra: &[&str], input: &[u8], envs: &[(&str, &str)]) -> 
 }
 
 /// Prints a program's output with `secrets` hidden.
-fn show(label: &str, bytes: &[u8], secrets: &[&[u8]]) {
+pub(super) fn show(label: &str, bytes: &[u8], secrets: &[&[u8]]) {
     if bytes.iter().all(u8::is_ascii_whitespace) {
         return;
     }

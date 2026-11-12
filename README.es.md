@@ -187,9 +187,10 @@ cemi incident tienda/supabase#key -e prod      # se filtró: dónde está, quié
 ```
 
 Si un destino o la verificación falla, la llave vieja vuelve a todos lados. Incluidos: secretos
-de GitHub Actions, llaves de API y secretos de funciones de Supabase, archivos `.env` y
-cualquier comando; cualquiera puede agregar un proveedor con un programa pequeño. Ver
-[docs/connectors.md](docs/connectors.md).
+de GitHub Actions; llaves de API y secretos de funciones de Supabase; tokens de API y secretos
+de Workers de Cloudflare; llaves de API de Resend; variables de Netlify y Vercel; archivos
+`.env` en esta computadora o en un servidor por SSH; y cualquier comando. Cualquiera puede
+agregar un proveedor con un programa pequeño. Ver [docs/connectors.md](docs/connectors.md).
 
 `prod` está protegido: los cambios ahí piden tu contraseña, y si una IA los pide por MCP solo
 crea una solicitud que tú apruebas con `cemi approve`.
