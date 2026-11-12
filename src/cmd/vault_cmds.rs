@@ -134,7 +134,7 @@ fn event(action: &str) -> audit::Event<'_> {
 }
 
 /// Makes sure `.cemi/` is in the project's .gitignore.
-fn add_to_gitignore(dir: &std::path::Path) -> Result<()> {
+pub(super) fn add_to_gitignore(dir: &std::path::Path) -> Result<()> {
     let path = dir.join(".gitignore");
     let current = std::fs::read_to_string(&path).unwrap_or_default();
     let already = current

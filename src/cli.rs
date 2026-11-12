@@ -413,6 +413,20 @@ pub enum Cmd {
         deny: bool,
     },
 
+    /// Give an entity to another developer, encrypted to their key (no server)
+    #[command(after_help = "Examples:
+          cemi share key                                      # your public key, for others to share with you
+          cemi share acme/shop --with age1… -e dev --name ana # writes acme-shop.share.age
+          cemi share accept acme-shop.share.age               # on the receiver's computer
+          cemi share ls")]
+    Share(ShareArgs),
+    /// Keep this vault the same on several computers through a private git repository
+    #[command(after_help = "Examples:
+          cemi sync init git@github.com:me/vault.git -g   # once, on the first computer
+          cemi sync clone git@github.com:me/vault.git -g  # on another computer
+          cemi sync -g                                    # send and receive changes")]
+    Sync(SyncArgs),
+
     /// Access tokens for AI clients
     #[command(subcommand)]
     Token(TokenCmd),
@@ -899,6 +913,58 @@ pub enum ApiCmd {
         #[arg(short = 'H', long = "header", value_name = "NAME:VALUE")]
         header: Vec<String>,
     },
+}
+
+#[derive(clap::Args)]
+#[command(args_conflicts_with_subcommands = true)]
+pub struct ShareArgs {
+    #[command(subcommand)]
+    pub cmd: Option<ShareCmd>,
+    /// Entity to share, like acme/shop (with everything below it)
+    #[arg(requires_all = ["with", "envs"])]
+    pub entity: Option<String>,
+    /// The receiver's public key (they get it with `cemi share key`)
+    #[arg(long, value_name = "PUBLIC_KEY")]
+    pub with: Option<String>,
+    /// Environments whose values go (repeat it); no other value is included
+    #[arg(short = 'e', long = "env", add = ArgValueCompleter::new(crate::complete::envs))]
+    pub envs: Vec<String>,
+    /// A name for the receiver, for `cemi share ls` and `cemi status`
+    #[arg(long)]
+    pub name: Option<String>,
+    /// File to write (default: <entity>.share.age in this folder)
+    #[arg(short, long)]
+    pub output: Option<std::path::PathBuf>,
+}
+
+#[derive(Subcommand)]
+pub enum ShareCmd {
+    /// This vault's public key, to give to whoever shares with you
+    Key,
+    /// Import a share file into this vault
+    Accept {
+        file: std::path::PathBuf,
+        /// Put it under another entity path (default: the sender's path)
+        #[arg(long = "as", value_name = "ENTITY")]
+        as_path: Option<String>,
+    },
+    /// What this vault shared, with whom, and whether it changed since
+    Ls,
+}
+
+#[derive(clap::Args)]
+#[command(args_conflicts_with_subcommands = true)]
+pub struct SyncArgs {
+    #[command(subcommand)]
+    pub cmd: Option<SyncCmd>,
+}
+
+#[derive(Subcommand)]
+pub enum SyncCmd {
+    /// Start syncing this vault to an empty private git repository
+    Init { remote: String },
+    /// Copy a synced vault to this computer (-g: as the global vault; otherwise .cemi here)
+    Clone { remote: String },
 }
 
 #[derive(Subcommand)]

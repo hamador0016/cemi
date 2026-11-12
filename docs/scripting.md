@@ -39,7 +39,7 @@ With `--json`, standard output is exactly one JSON object:
 - `ok` is true only when the exit code is 0.
 - `data` is the structured result of commands that read: `ls`, `show`, `find`, `status`,
   `history`, `check`, `dest ls`, `api ls`, `api call`, `env ls`, `env diff`, `var ls`, `task ls`, `deps`,
-  `project ls`, `log`, `scan`, `token ls`, `mcp ls`, `approve` (the list), `preset ls` and
+  `project ls`, `share key`, `share ls`, `share accept`, `sync`, `log`, `scan`, `token ls`, `mcp ls`, `approve` (the list), `preset ls` and
   `import --discover`.
   Other commands give `null` and their output in `text`.
 - `error` is there only when the command failed. `kind` is one of `locked`, `not_found`,

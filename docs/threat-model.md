@@ -26,6 +26,8 @@ production secrets.
 | A prompt-injected AI changes production | Pushes, rotations and revocations in protected environments (`prod`, `production` by default) need the vault password typed by a person. Through MCP they only create a request for `cemi approve`, which expires in one hour and works once. A token limited to some environments cannot rotate a value shared by all of them. |
 | An AI sends a secret somewhere new | Destinations, origins and API addresses are set only from the command line, never through MCP. Giving a key of a protected environment an API address needs the password. Values travel only over HTTPS (plain http is refused except for localhost), or over SSH with your own `ssh`, which checks the server's host key. |
 | An AI needs a production key to test an API | The credential proxy (MCP `call_api`, `cemi run --proxy`) adds the key itself and sends the request only to the API's address, only for the methods and paths allowed with `cemi api add`. Paths with `..`, encoded slashes or backslashes are refused, redirects are not followed, and the key is hidden in answers. The local proxy listens on 127.0.0.1 under a random path that only the command it serves knows. |
+| Someone intercepts a shared entity | `cemi share` encrypts the file with age to the receiver's vault key; only that vault opens it. It holds only the chosen environments' values; origins, destinations, APIs and verify commands are left out. Sharing a protected environment needs the password. |
+| The git host of a synced vault reads it | Only `vault.json` and `objects/*.age` are pushed. Objects are age-encrypted (values, names, notes); the header holds the public key, the Argon2id parameters and salt, and the vault key wrapped by the password and the recovery code. The host sees how many objects there are, their sizes and when they change. The audit log and the folders of known projects are not pushed. |
 | A failed rotation breaks a service | The new value is saved as pending before anything changes. If a destination or the `verify` check fails, the old value is written back to every destination already changed, and the unused new key is deleted at the provider. |
 | Someone with the repository reads the CI secrets | `cemi.ci.age` is encrypted with age to a key made only for CI, kept in the CI's secret store (`CEMI_CI_KEY`). It holds only the variables of one environment, and only those chosen with `--only` or `[ci] vars`. Exporting a protected environment asks for the password. In GitHub Actions every value is masked in the log. If the CI key leaks, the values in every copy of the file in git history are exposed: replace the key and those values. |
 
@@ -56,7 +58,14 @@ production secrets.
    safe as that account and that machine. Provider tokens that can create other tokens (such as
    the one `cloudflare-token` uses) are powerful: give them the narrowest permission listed in
    [docs/connectors.md](connectors.md).
-10. **Providers that cannot revoke.** Without an origin that supports it, the old key is revoked by
+10. **What was shared.** A shared value cannot be taken back; whoever received it keeps it, and
+    so does any copy of the share file. To cut someone off, rotate the keys they received.
+11. **A synced vault's repository.** Its copy of `vault.json` is as hard to open as your
+    password is to guess, offline and without limit, so a synced vault needs a strong password.
+    An old password keeps opening the copies of `vault.json` in the git history: after
+    `cemi passwd` because a password leaked, also replace the vault key (a new vault) or the
+    repository.
+12. **Providers that cannot revoke.** Without an origin that supports it, the old key is revoked by
    hand; Cemí says so and keeps it as an archived version.
 
 ## Design rules

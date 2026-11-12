@@ -21,6 +21,8 @@ pub mod resolve;
 pub mod rotation;
 pub mod runner;
 pub mod session;
+pub mod share;
+pub mod sync;
 pub mod types_gen;
 pub mod ui;
 pub mod usage;

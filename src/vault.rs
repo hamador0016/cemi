@@ -28,7 +28,7 @@ use zeroize::Zeroizing;
 use crate::crypto::{self, AgeKey, KdfParams, Sealed};
 use crate::model::{
     Approval, DEFAULT_PROTECTED, Entity, Envelope, KnownProject, Launcher, OBJECT_FORMAT, Object,
-    Record, Sensitive, Token, validate_name,
+    Record, Sensitive, SentShare, Token, validate_name,
 };
 
 pub const HEADER_FILE: &str = "vault.json";
@@ -69,6 +69,10 @@ pub struct Header {
     /// unlocking the global vault also unlocks this one.
     #[serde(default)]
     pub global: Option<GlobalWrap>,
+    /// When the password or the recovery code last changed. `cemi sync`
+    /// keeps the newer header when two computers changed it.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub changed: Option<Timestamp>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -168,6 +172,7 @@ impl Header {
             &self.aad("password"),
             master.secret_text().as_bytes(),
         ));
+        self.changed = Some(Timestamp::now());
         Ok(())
     }
 
@@ -180,6 +185,7 @@ impl Header {
             &self.aad("recovery"),
             master.secret_text().as_bytes(),
         ));
+        self.changed = Some(Timestamp::now());
         Ok(code)
     }
 
@@ -226,6 +232,7 @@ pub struct Vault {
     pub launchers: BTreeMap<String, Launcher>,
     pub approvals: BTreeMap<String, Approval>,
     pub projects: BTreeMap<String, KnownProject>,
+    pub shares: BTreeMap<String, SentShare>,
     /// Objects that could not be opened (corrupt, or encrypted to an unknown key).
     pub unreadable: Vec<String>,
     dirty: BTreeSet<String>,
@@ -274,6 +281,7 @@ impl Vault {
             password: None,
             recovery: None,
             global: None,
+            changed: None,
         };
         let mut recovery_code = None;
         if let Some(pw) = password {
@@ -314,6 +322,7 @@ impl Vault {
             launchers: BTreeMap::new(),
             approvals: BTreeMap::new(),
             projects: BTreeMap::new(),
+            shares: BTreeMap::new(),
             unreadable: Vec::new(),
             dirty: BTreeSet::new(),
             deleted: BTreeSet::new(),
@@ -366,6 +375,7 @@ impl Vault {
             launchers: BTreeMap::new(),
             approvals: BTreeMap::new(),
             projects: BTreeMap::new(),
+            shares: BTreeMap::new(),
             unreadable: Vec::new(),
             dirty: BTreeSet::new(),
             deleted: BTreeSet::new(),
@@ -417,6 +427,9 @@ impl Vault {
                             }
                             Object::Project(p) => {
                                 vault.projects.insert(id, p);
+                            }
+                            Object::Share(sh) => {
+                                vault.shares.insert(id, sh);
                             }
                         }
                     }
@@ -509,6 +522,9 @@ impl Vault {
         }
         if let Some(p) = self.projects.get(id) {
             return Ok((Object::Project(p.clone()), vault_recipient));
+        }
+        if let Some(sh) = self.shares.get(id) {
+            return Ok((Object::Share(sh.clone()), vault_recipient));
         }
         bail!("internal error: object {id} not found")
     }
@@ -717,6 +733,7 @@ impl Vault {
             fields: Vec::new(),
             memory: BTreeMap::new(),
             archived: false,
+            received: None,
             created: now,
             updated: now,
         };
@@ -829,6 +846,51 @@ impl Vault {
                 if self.write {
                     self.deleted.insert(id);
                 }
+            }
+        }
+    }
+
+    // ----- shares -----
+
+    pub fn put_share(&mut self, sh: SentShare) {
+        self.dirty.insert(sh.id.clone());
+        self.shares.insert(sh.id.clone(), sh);
+    }
+
+    /// Writes an object exactly as given (a merged copy from `cemi sync`),
+    /// encrypted like any other.
+    pub fn replace_object(&mut self, object: Object) {
+        let id = object.id().to_string();
+        self.adopt(object);
+        self.deleted.remove(&id);
+        self.dirty.insert(id);
+    }
+
+    /// Takes in an object whose file is already on disk (it came from
+    /// another computer through `cemi sync`).
+    pub fn adopt(&mut self, object: Object) {
+        let id = object.id().to_string();
+        match object {
+            Object::Entity(e) => {
+                self.entities.insert(id.clone(), e);
+            }
+            Object::Record(r) => {
+                self.records.insert(id.clone(), r);
+            }
+            Object::Token(t) => {
+                self.tokens.insert(id.clone(), t);
+            }
+            Object::Launcher(l) => {
+                self.launchers.insert(id.clone(), l);
+            }
+            Object::Approval(a) => {
+                self.approvals.insert(id.clone(), a);
+            }
+            Object::Project(p) => {
+                self.projects.insert(id.clone(), p);
+            }
+            Object::Share(sh) => {
+                self.shares.insert(id, sh);
             }
         }
     }
