@@ -59,20 +59,19 @@ settings, not in a workspace.
 ## Install
 
 Install `cemi` first (see the [main README](../../README.md)). The extension is not on the
-Marketplace yet. Run it from this folder:
+Marketplace yet; it comes as a `.vsix` file. Build it from this folder (it uses Microsoft's
+`vsce`, run once through `npx`):
+
+```bash
+npx --yes @vscode/vsce@4.1.0 package -o cemi-vscode.vsix
+code --install-extension cemi-vscode.vsix
+```
+
+The CI builds the same file on every push to `main` (artifact `cemi-vscode`). To try changes
+without installing:
 
 ```bash
 code --extensionDevelopmentPath=/path/to/cemi/editors/vscode /path/to/your/project
-```
-
-Or copy the folder into your extensions folder and restart VS Code:
-
-```bash
-cp -r editors/vscode ~/.vscode/extensions/cemi.cemi-0.1.0
-```
-
-```powershell
-Copy-Item -Recurse editors\vscode "$env:USERPROFILE\.vscode\extensions\cemi.cemi-0.1.0"
 ```
 
 It has no dependencies. It activates in folders that have a `cemi.toml` or a `.cemi/` vault.

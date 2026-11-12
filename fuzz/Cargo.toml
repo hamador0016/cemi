@@ -1,0 +1,63 @@
+# Fuzzing: cargo-fuzz feeds these targets random input to find crashes and
+# hangs in everything Cemí reads from outside. Run with Rust nightly:
+#   cargo +nightly fuzz run <target>
+[package]
+name = "cemi-fuzz"
+version = "0.0.0"
+publish = false
+edition = "2024"
+license = "Apache-2.0"
+
+[package.metadata]
+cargo-fuzz = true
+
+[dependencies]
+libfuzzer-sys = "0.4.13"
+cemi = { path = ".." }
+serde_json = "1"
+toml = "0.9"
+
+# Not part of the main workspace.
+[workspace]
+
+[[bin]]
+name = "references"
+path = "fuzz_targets/references.rs"
+test = false
+doc = false
+bench = false
+
+[[bin]]
+name = "dotenv"
+path = "fuzz_targets/dotenv.rs"
+test = false
+doc = false
+bench = false
+
+[[bin]]
+name = "project_file"
+path = "fuzz_targets/project_file.rs"
+test = false
+doc = false
+bench = false
+
+[[bin]]
+name = "vault_files"
+path = "fuzz_targets/vault_files.rs"
+test = false
+doc = false
+bench = false
+
+[[bin]]
+name = "share_file"
+path = "fuzz_targets/share_file.rs"
+test = false
+doc = false
+bench = false
+
+[[bin]]
+name = "proxy_paths"
+path = "fuzz_targets/proxy_paths.rs"
+test = false
+doc = false
+bench = false

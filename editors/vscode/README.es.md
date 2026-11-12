@@ -59,20 +59,19 @@ tus ajustes de usuario, no en los de un proyecto.
 ## Instalar
 
 Primero instala `cemi` (ver el [README principal](../../README.es.md)). La extensión todavía no
-está en el Marketplace. Córrela desde esta carpeta:
+está en el Marketplace; viene como un archivo `.vsix`. Se arma desde esta carpeta (usa `vsce` de
+Microsoft, corrido una vez con `npx`):
+
+```bash
+npx --yes @vscode/vsce@4.1.0 package -o cemi-vscode.vsix
+code --install-extension cemi-vscode.vsix
+```
+
+La CI arma el mismo archivo en cada push a `main` (artefacto `cemi-vscode`). Para probar cambios
+sin instalar:
 
 ```bash
 code --extensionDevelopmentPath=/ruta/a/cemi/editors/vscode /ruta/a/tu/proyecto
-```
-
-O copia la carpeta a tu carpeta de extensiones y reinicia VS Code:
-
-```bash
-cp -r editors/vscode ~/.vscode/extensions/cemi.cemi-0.1.0
-```
-
-```powershell
-Copy-Item -Recurse editors\vscode "$env:USERPROFILE\.vscode\extensions\cemi.cemi-0.1.0"
 ```
 
 No tiene dependencias. Se activa en carpetas que tienen un `cemi.toml` o una bóveda `.cemi/`.

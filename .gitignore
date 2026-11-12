@@ -15,3 +15,6 @@ privado/
 # Rust
 target/
 target-old/
+
+# Built VS Code extension
+*.vsix

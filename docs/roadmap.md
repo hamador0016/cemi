@@ -79,17 +79,27 @@ using it.
 ## Before the first public release
 
 Trust matters more than features in a secrets tool. These are free and come before announcing
-Cemí:
+Cemí.
 
-- **Compatibility tests**: a vault created with v0.1 lives in the repository, and every new
-  version must open it.
-- **Fuzzing** (`cargo-fuzz`) of everything that reads outside data: references, `.env`,
-  `cemi.toml` and vault files.
-- **Verifiable releases** with cargo-dist: SHA-256 checksums, build provenance attestations
-  (`actions/attest-build-provenance`) and minisign signatures checked by `cemi self update`.
+Done:
+
+- **Compatibility tests**: vaults made with the v0.1 binary live in `tests/fixtures`, and every
+  version must open them, read every value and sign them on the first change.
+- **Fuzzing** (`cargo-fuzz`, in `fuzz/`) of everything that reads outside data: references,
+  templates, `.env`, `cemi.toml`, CI file headers, vault and share files, and proxy paths. One
+  minute per target on every push, ten every week.
+- **Verifiable releases** with cargo-dist: archives for Windows, macOS and Linux with SHA-256
+  checksums, install scripts, build provenance attestations, and `cemi self update`.
 - **Supply chain**: actions pinned by commit hash, Dependabot, OpenSSF Scorecard.
-- **Repository**: protected `main`, CHANGELOG (git-cliff), semantic versioning, issue templates.
-- **Publish the name** on crates.io (and npm for the installer).
+- **Repository**: CHANGELOG, semantic versioning, issue and pull request templates.
+- The VS Code extension builds as a `.vsix` in CI.
+
+Left:
+
+- **Protected `main`** (a repository setting).
+- **Publish the name** on crates.io and npm, and the first release (a `v0.5.0` tag).
+- **minisign signatures** checked by `cemi self update`: they need a signing key that only the
+  maintainer holds.
 - **External audit** once there are users (OSTIF supports open source security projects).
 
 ## Adoption

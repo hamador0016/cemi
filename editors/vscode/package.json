@@ -5,12 +5,27 @@
   "version": "0.1.0",
   "publisher": "cemi",
   "license": "Apache-2.0",
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/hamador0016/cemi",
+    "directory": "editors/vscode"
+  },
+  "homepage": "https://github.com/hamador0016/cemi/tree/main/editors/vscode",
   "private": true,
   "engines": {
     "vscode": "^1.85.0"
   },
-  "categories": ["Other", "Linters"],
-  "keywords": ["secrets", "env", "dotenv", "vault", "api keys"],
+  "categories": [
+    "Other",
+    "Linters"
+  ],
+  "keywords": [
+    "secrets",
+    "env",
+    "dotenv",
+    "vault",
+    "api keys"
+  ],
   "main": "./extension.js",
   "activationEvents": [
     "workspaceContains:**/cemi.toml",
@@ -62,8 +77,14 @@
         },
         "cemi.scan.exclude": {
           "type": "array",
-          "items": { "type": "string" },
-          "default": ["**/.env", "**/.env.*", "**/.cemi/**"],
+          "items": {
+            "type": "string"
+          },
+          "default": [
+            "**/.env",
+            "**/.env.*",
+            "**/.cemi/**"
+          ],
           "description": "Glob patterns of files not checked on save."
         },
         "cemi.timeoutMs": {

@@ -43,6 +43,14 @@ jobs:
         run: for f in editors/vscode/extension.js editors/vscode/src/*.js; do node --check "$f"; done
       - name: Tests
         run: node --test editors/vscode/test/*.test.js
+      - name: Package
+        working-directory: editors/vscode
+        run: npx --yes @vscode/vsce@4.1.0 package -o cemi-vscode.vsix
+      - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
+        with:
+          name: cemi-vscode
+          path: editors/vscode/cemi-vscode.vsix
+          retention-days: 30
 
   licenses:
     name: Licenses and advisories

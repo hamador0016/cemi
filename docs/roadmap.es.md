@@ -85,17 +85,28 @@ comando.
 ## Antes de la primera versión pública
 
 En una herramienta de secretos, la confianza pesa más que las funciones. Todo esto es gratis y
-va antes de anunciar Cemí:
+va antes de anunciar Cemí.
 
-- **Pruebas de compatibilidad**: una bóveda creada con la v0.1 vive en el repo y cada versión
-  nueva tiene que abrirla.
-- **Fuzzing** (`cargo-fuzz`) de todo lo que lee datos de afuera: referencias, `.env`,
-  `cemi.toml` y archivos de la bóveda.
-- **Instaladores verificables** con cargo-dist: checksums SHA-256, atestación de origen
-  (`actions/attest-build-provenance`) y firmas minisign que verifica `cemi self update`.
+Hecho:
+
+- **Pruebas de compatibilidad**: bóvedas creadas con el binario de la v0.1 viven en
+  `tests/fixtures`, y cada versión tiene que abrirlas, leer todos los valores y firmarlas en el
+  primer cambio.
+- **Fuzzing** (`cargo-fuzz`, en `fuzz/`) de todo lo que lee datos de afuera: referencias,
+  plantillas, `.env`, `cemi.toml`, cabeceras de archivos de CI, archivos de bóveda y de
+  compartir, y rutas del proxy. Un minuto por objetivo en cada push y diez cada semana.
+- **Instaladores verificables** con cargo-dist: archivos para Windows, macOS y Linux con
+  checksums SHA-256, scripts de instalación, atestación de origen y `cemi self update`.
 - **Cadena de dependencias**: acciones fijadas por hash, Dependabot, OpenSSF Scorecard.
-- **Repo**: `main` protegida, CHANGELOG (git-cliff), versionado semántico, plantillas de issues.
-- **Reservar el nombre** en crates.io (y npm para el instalador).
+- **Repo**: CHANGELOG, versionado semántico, plantillas de issues y de pull requests.
+- La extensión de VS Code se arma como `.vsix` en la CI.
+
+Falta:
+
+- **`main` protegida** (un ajuste del repositorio).
+- **Reservar el nombre** en crates.io y npm, y la primera versión (una etiqueta `v0.5.0`).
+- **Firmas minisign** que verifique `cemi self update`: necesitan una llave de firma que solo
+  guarda quien mantiene el proyecto.
 - **Auditoría externa** cuando haya usuarios (OSTIF apoya proyectos open source de seguridad).
 
 ## Difusión
