@@ -7,6 +7,13 @@ change commands. Vaults made by any earlier version keep opening (`tests/compat.
 ## Unreleased
 
 ### Added
+- The Cemí skill (`plugins/cemi`): teaches coding agents to use Cemí's MCP tools and never
+  handle values. In Claude Code: `/plugin install cemi --marketplace hamador0016/cemi`.
+- Every release is downloaded, checked (SHA-256 and build attestation), installed with the
+  install script and used on fresh Windows, macOS and Linux machines (the Install workflow),
+  and again every week.
+- README: downloading and checking a release is the first way to install; "Your AI in 60
+  seconds".
 - `cemi mcp setup` writes the configuration of `claude-desktop`, `cursor`, `vscode` (GitHub
   Copilot), `windsurf`, `devin`, `zed`, `codex` and `gemini`: the project's file with a project
   vault, the user's file with `--global`. Other servers and settings in the file are kept; a
