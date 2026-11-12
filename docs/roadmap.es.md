@@ -100,19 +100,21 @@ Hecho:
 - **Cadena de dependencias**: acciones fijadas por hash, Dependabot, OpenSSF Scorecard.
 - **Repo**: CHANGELOG, versionado semántico, plantillas de issues y de pull requests.
 - La extensión de VS Code se arma como `.vsix` en la CI.
+- **`main` protegida**, detección de secretos con bloqueo al subir y actualizaciones de
+  seguridad de Dependabot.
+- **Primera versión**: v0.5.0 en GitHub, con instaladores, y en crates.io.
 
 Falta:
 
-- **`main` protegida** (un ajuste del repositorio).
-- **Reservar el nombre** en crates.io y npm, y la primera versión (una etiqueta `v0.5.0`).
+- **Reservar el nombre** en npm.
 - **Firmas minisign** que verifique `cemi self update`: necesitan una llave de firma que solo
   guarda quien mantiene el proyecto.
 - **Auditoría externa** cuando haya usuarios (OSTIF apoya proyectos open source de seguridad).
 
 ## Difusión
 
-- Una grabación de 20 segundos en el README (asciinema): `import` → `run` → una IA usando una
-  llave que nunca ve.
+- ~~Una grabación en el README~~: hecha con VHS (`demo/demo.tape`, la graba el workflow Demo):
+  `import` → `cemi.toml` → `run --redact` → `status`.
 - Sitio de documentación con mdBook en GitHub Pages.
 - Una comparación justa con dotenvx, SOPS, Infisical y el CLI de 1Password.
 - Instaladores: Scoop y winget (Windows), Homebrew (macOS), `cargo binstall`.

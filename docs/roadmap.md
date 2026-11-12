@@ -93,19 +93,20 @@ Done:
 - **Supply chain**: actions pinned by commit hash, Dependabot, OpenSSF Scorecard.
 - **Repository**: CHANGELOG, semantic versioning, issue and pull request templates.
 - The VS Code extension builds as a `.vsix` in CI.
+- **Protected `main`**, secret scanning with push protection, and Dependabot security updates.
+- **First release**: v0.5.0 on GitHub, with installers, and on crates.io.
 
 Left:
 
-- **Protected `main`** (a repository setting).
-- **Publish the name** on crates.io and npm, and the first release (a `v0.5.0` tag).
+- **Reserve the name** on npm.
 - **minisign signatures** checked by `cemi self update`: they need a signing key that only the
   maintainer holds.
 - **External audit** once there are users (OSTIF supports open source security projects).
 
 ## Adoption
 
-- A 20-second recording in the README (asciinema): `import` → `run` → an AI using a key it never
-  sees.
+- ~~A recording in the README~~: done with VHS (`demo/demo.tape`, recorded by the Demo
+  workflow): `import` → `cemi.toml` → `run --redact` → `status`.
 - Documentation site with mdBook on GitHub Pages.
 - A fair comparison with dotenvx, SOPS, Infisical and the 1Password CLI.
 - Installers: Scoop and winget (Windows), Homebrew (macOS), `cargo binstall`.
