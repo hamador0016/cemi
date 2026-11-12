@@ -16,6 +16,9 @@ Every command can be used from scripts and CI: exit codes do not change between 
 | 6 | A provider, the network or an external command failed |
 | 9 | Any other error |
 
+`--no-input` makes Cemí fail instead of asking: a locked vault gives exit code 3 at once, and a
+"go ahead?" gives 5. Editors and other tools that have no terminal should always pass it.
+
 `cemi status` always exits 0 when it runs: it reports, it does not judge. Use `cemi check` in
 CI to fail on destinations that are out of date.
 
@@ -62,6 +65,13 @@ The records of an entity that have a secret with no value:
 ```bash
 cemi show acme/shop/stripe --json | jq '.data.fields[] | select(.secret) | {name, set: [.values[].set]}'
 ```
+
+Each `scan` finding has `place`, `line`, `column` (1-based, in characters), `length` (in
+characters) and `secret`, the reference of the value found. `line`, `column` and `length` are
+null with `--history`.
+
+Each `var ls` variable has `reference` as written in `cemi.toml` and `resolved`, the full
+reference with its vault (`local:db#url`), or null when the reference is not valid.
 
 Status values of `check`: `up_to_date`, `outdated`, `never_sent`, `changed_outside`, `missing`,
 `unverifiable` (the destination cannot be read back) and `error`.

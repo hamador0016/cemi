@@ -19,7 +19,8 @@ struct JsonOut {
 }
 static NON_INTERACTIVE: Mutex<bool> = Mutex::new(false);
 
-/// For processes started by AI clients: never ask for a password.
+/// For processes started by AI clients and editors (`--no-input`): never ask
+/// for a password or a confirmation.
 pub fn set_non_interactive() {
     *NON_INTERACTIVE.lock().expect("not poisoned") = true;
 }
@@ -116,7 +117,7 @@ pub fn secret_value(prompt: &str, from_stdin: bool) -> Result<Zeroizing<String>>
 
 /// Yes/no question on the terminal. Without a terminal the answer is no.
 pub fn confirm(question: &str) -> bool {
-    if !std::io::stdin().is_terminal() {
+    if *NON_INTERACTIVE.lock().expect("not poisoned") || !std::io::stdin().is_terminal() {
         return false;
     }
     eprint!("{question} [y/N] ");

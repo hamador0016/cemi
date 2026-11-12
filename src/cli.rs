@@ -29,6 +29,10 @@ pub struct Cli {
     #[arg(long, global = true)]
     pub json: bool,
 
+    /// Never ask for a password or a confirmation; fail instead (exit code 3 or 5). For editors and other tools
+    #[arg(long, global = true)]
+    pub no_input: bool,
+
     #[command(subcommand)]
     pub command: Cmd,
 }

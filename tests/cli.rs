@@ -124,6 +124,18 @@ fn scan_finds_secrets_in_files() {
     assert!(out.contains("config.js:1"), "{out}");
     assert!(out.contains("db#password [dev]"), "{out}");
     assert!(!out.contains(SECRET));
+    // One file, as editors call it: where the value starts and how long it is.
+    let (code, out, _) = env.run(&["--json", "--no-input", "scan", "config.js"], "");
+    assert_eq!(code, 1);
+    let v: serde_json::Value = serde_json::from_str(out.trim()).unwrap();
+    let f = &v["data"]["findings"][0];
+    assert_eq!(f["place"], "config.js");
+    assert_eq!(
+        (f["line"].clone(), f["column"].clone()),
+        (1.into(), 13.into())
+    );
+    assert_eq!(f["length"], SECRET.len());
+    assert!(!out.contains(SECRET));
     std::fs::remove_file(env.project.join("config.js")).unwrap();
     env.ok(&["scan"], "");
 }

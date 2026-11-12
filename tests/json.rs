@@ -45,6 +45,7 @@ fn read_commands_give_data_and_never_secrets() {
 
     let (_, v) = json(&env, &["var", "ls"]);
     assert_eq!(v["data"]["variables"][0]["name"], "DATABASE_URL");
+    assert_eq!(v["data"]["variables"][0]["resolved"], "local:db#url");
 
     let (_, v) = json(&env, &["status"]);
     assert!(v["data"]["vaults"].is_array(), "{v}");
@@ -104,6 +105,17 @@ fn exit_codes_are_stable() {
     assert_eq!(code, 3, "{out}");
     let v: serde_json::Value = serde_json::from_str(out.trim()).unwrap();
     assert_eq!(v["error"]["kind"], "locked");
+    // --no-input: editors get "locked" at once instead of a password prompt.
+    let (code, v) = json(&env, &["--no-input", "show", "db"]);
+    assert_eq!(code, 3, "{v}");
+    assert_eq!(v["error"]["kind"], "locked");
+    assert!(
+        v["error"]["message"]
+            .as_str()
+            .unwrap()
+            .contains("cemi unlock"),
+        "{v}"
+    );
 
     // 2: wrong usage (from the argument parser, before any JSON).
     let (code, _, _) = env.run(&["ls", "--no-such-flag"], "");

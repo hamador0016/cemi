@@ -31,6 +31,19 @@ jobs:
       - name: Tests
         run: cargo test
 
+  vscode:
+    name: VS Code extension
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v5
+      - uses: actions/setup-node@v5
+        with:
+          node-version: "lts/*"
+      - name: Syntax
+        run: for f in editors/vscode/extension.js editors/vscode/src/*.js; do node --check "$f"; done
+      - name: Tests
+        run: node --test editors/vscode/test/*.test.js
+
   licenses:
     name: Licenses and advisories
     runs-on: ubuntu-latest
