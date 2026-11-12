@@ -41,6 +41,10 @@ Type "grep -A2 '^\[env\]' cemi.toml"
 Enter
 Sleep 2.5s
 
+Hide
+Type "clear"
+Enter
+Show
 Type "# Run with the keys injected, and hidden if anything prints them"
 Enter
 Type "cemi run -e dev --redact -- ./app.sh"
@@ -49,7 +53,7 @@ Sleep 3s
 
 Type "# Keep what you will need the day it leaks"
 Enter
-Type `cemi note shop/STRIPE_KEY --purpose "Stripe payments" --rotate "Roll it in the Stripe dashboard"`
+Type `cemi note shop/STRIPE_KEY --purpose "Stripe payments" --rotate "Roll it in Stripe"`
 Enter
 Sleep 1.5s
 Type "cemi status"
