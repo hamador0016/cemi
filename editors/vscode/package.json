@@ -1,0 +1,78 @@
+{
+  "name": "cemi",
+  "displayName": "Cemí",
+  "description": "Hover an environment variable to see what the key is for, when it expires and how to rotate it, without ever showing its value. Warns when a secret from your vault is written in a file.",
+  "version": "0.1.0",
+  "publisher": "cemi",
+  "license": "Apache-2.0",
+  "private": true,
+  "engines": {
+    "vscode": "^1.85.0"
+  },
+  "categories": ["Other", "Linters"],
+  "keywords": ["secrets", "env", "dotenv", "vault", "api keys"],
+  "main": "./extension.js",
+  "activationEvents": [
+    "workspaceContains:**/cemi.toml",
+    "workspaceContains:**/.cemi/vault.json"
+  ],
+  "capabilities": {
+    "untrustedWorkspaces": {
+      "supported": true,
+      "description": "Cemí only reads cemi.toml and runs the cemi program you installed, never one from the workspace."
+    },
+    "virtualWorkspaces": false
+  },
+  "contributes": {
+    "commands": [
+      {
+        "command": "cemi.unlock",
+        "title": "Unlock the vault (in a terminal)",
+        "category": "Cemí"
+      },
+      {
+        "command": "cemi.scanFile",
+        "title": "Look for vault values in this file",
+        "category": "Cemí"
+      },
+      {
+        "command": "cemi.refresh",
+        "title": "Reload variables and records",
+        "category": "Cemí"
+      }
+    ],
+    "configuration": {
+      "title": "Cemí",
+      "properties": {
+        "cemi.path": {
+          "type": "string",
+          "default": "cemi",
+          "scope": "machine",
+          "markdownDescription": "The cemi program: a name looked up in `PATH`, or a full path. On Windows, point to `cemi.exe`."
+        },
+        "cemi.hover.enabled": {
+          "type": "boolean",
+          "default": true,
+          "description": "Show what a variable is for, when it expires and how it is rotated when you hover it."
+        },
+        "cemi.scan.onSave": {
+          "type": "boolean",
+          "default": true,
+          "description": "When a file is saved, warn about values of your vaults written in it."
+        },
+        "cemi.scan.exclude": {
+          "type": "array",
+          "items": { "type": "string" },
+          "default": ["**/.env", "**/.env.*", "**/.cemi/**"],
+          "description": "Glob patterns of files not checked on save."
+        },
+        "cemi.timeoutMs": {
+          "type": "number",
+          "default": 5000,
+          "minimum": 500,
+          "description": "How long to wait for cemi, in milliseconds."
+        }
+      }
+    }
+  }
+}

@@ -65,6 +65,10 @@ when = true
 style = "bold yellow"
 ```
 
+In VS Code, the extension in [editors/vscode](editors/vscode/README.md) shows what a variable is
+for, when it expires and how it is rotated when you hover it, and warns when a value of your
+vaults is written in a file.
+
 ## Quick start
 
 ```bash

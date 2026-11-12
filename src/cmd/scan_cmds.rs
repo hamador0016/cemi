@@ -93,18 +93,34 @@ fn needles(ctx: &mut Ctx) -> Result<Needles> {
 struct Finding {
     place: String,
     line: usize,
+    /// 1-based, in characters, so editors can underline the value.
+    column: usize,
+    /// In characters.
+    length: usize,
     secret: String,
 }
 
 fn scan_bytes(n: &Needles, place: &str, data: &[u8], out: &mut Vec<Finding>) {
     for m in n.matcher.find_iter(data) {
-        let line = data[..m.start()].iter().filter(|b| **b == b'\n').count() + 1;
+        let before = &data[..m.start()];
+        let line = before.iter().filter(|b| **b == b'\n').count() + 1;
+        let line_start = before
+            .iter()
+            .rposition(|b| *b == b'\n')
+            .map_or(0, |i| i + 1);
         out.push(Finding {
             place: place.to_string(),
             line,
+            column: chars(&data[line_start..m.start()]) + 1,
+            length: chars(&data[m.start()..m.end()]),
             secret: n.labels[m.pattern().as_usize()].clone(),
         });
     }
+}
+
+/// Characters in UTF-8 text (bytes that continue a character are skipped).
+fn chars(bytes: &[u8]) -> usize {
+    bytes.iter().filter(|b| (**b & 0xC0) != 0x80).count()
 }
 
 fn git(dir: &Path, args: &[&str]) -> Result<Vec<u8>> {
@@ -183,7 +199,11 @@ pub fn scan(ctx: &mut Ctx, path: Option<PathBuf>, staged: bool, history: bool) -
                 continue;
             }
             let Ok(data) = std::fs::read(p) else { continue };
-            let shown = p.strip_prefix(&root).unwrap_or(p).display().to_string();
+            let shown = match p.strip_prefix(&root) {
+                Ok(rel) if !rel.as_os_str().is_empty() => rel.display().to_string(),
+                // `cemi scan FILE`: the file itself.
+                _ => p.display().to_string(),
+            };
             scan_bytes(&n, &shown, &data, &mut findings);
         }
     }
@@ -192,6 +212,8 @@ pub fn scan(ctx: &mut Ctx, path: Option<PathBuf>, staged: bool, history: bool) -
         "findings": findings.iter().map(|f| serde_json::json!({
             "place": f.place,
             "line": (!history).then_some(f.line),
+            "column": (!history).then_some(f.column),
+            "length": (!history).then_some(f.length),
             "secret": f.secret,
         })).collect::<Vec<_>>(),
     }));

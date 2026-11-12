@@ -65,6 +65,10 @@ when = true
 style = "bold yellow"
 ```
 
+En VS Code, la extensión de [editors/vscode](editors/vscode/README.es.md) muestra para qué sirve
+una variable, cuándo vence y cómo se rota al pasar el mouse sobre ella, y avisa cuando un valor
+de tus bóvedas está escrito en un archivo.
+
 ## Primeros pasos
 
 ```bash

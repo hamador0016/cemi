@@ -226,6 +226,9 @@ pub fn run(cli: Cli) -> Result<i32> {
     if cli.password_stdin {
         ui::use_password_stdin();
     }
+    if cli.no_input {
+        ui::set_non_interactive();
+    }
     if cli.json {
         use crate::cli::McpCmd;
         const OTHER: &str = "its output belongs to another program";

@@ -68,12 +68,14 @@ pub fn var(ctx: &mut Ctx, cmd: VarCmd) -> Result<i32> {
                 crate::outln!("{k} = {}", v.text());
                 list.push(serde_json::json!({
                     "name": k, "reference": v.text(), "purpose": v.purpose(), "file": false,
+                    "resolved": project.resolve_ref(v.text()).ok().map(|r| r.to_string()),
                 }));
             }
             for (k, v) in &project.file.files {
                 crate::outln!("{k} = {}  (file)", v.text());
                 list.push(serde_json::json!({
                     "name": k, "reference": v.text(), "purpose": v.purpose(), "file": true,
+                    "resolved": project.resolve_ref(v.text()).ok().map(|r| r.to_string()),
                 }));
             }
             ui::data(serde_json::json!({ "variables": list }));
